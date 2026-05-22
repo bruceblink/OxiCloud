@@ -44,11 +44,12 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use crate::application::ports::blob_lifecycle::{BlobCreationHook, BlobDeletionHook};
+use crate::application::ports::blob_lifecycle::BlobLifecycleHook;
 use crate::application::ports::blob_storage_ports::BlobStorageBackend;
 use crate::application::ports::dedup_ports::{
     BlobMetadataDto, DedupPort, DedupResultDto, DedupStatsDto,
 };
+use crate::application::services::blob_lifecycle_service::BlobLifecycleService;
 use crate::domain::errors::{DomainError, ErrorKind};
 
 // ── CDC Constants ────────────────────────────────────────────────────────────
@@ -84,10 +85,8 @@ pub struct DedupService {
     /// Isolated maintenance pool for long-running operations
     /// (verify_integrity, garbage_collect) that must never starve the primary.
     maintenance_pool: Arc<PgPool>,
-    /// Hooks notified when a genuinely new blob is stored (no dedup hit).
-    blob_creation_hooks: Vec<Arc<dyn BlobCreationHook>>,
-    /// Hooks notified when a blob's ref_count reaches zero and it is deleted.
-    blob_hooks: Vec<Arc<dyn BlobDeletionHook>>,
+    /// Single lifecycle dispatcher — fired on blob created / deleted.
+    blob_lifecycle: Option<Arc<BlobLifecycleService>>,
 }
 
 impl DedupService {
@@ -105,36 +104,25 @@ impl DedupService {
             backend,
             pool,
             maintenance_pool,
-            blob_creation_hooks: vec![],
-            blob_hooks: vec![],
+            blob_lifecycle: None,
         }
     }
 
-    /// Register a [`BlobCreationHook`] to be called whenever a genuinely new
-    /// blob is stored.  Hooks are called in registration order.
-    pub fn add_blob_creation_hook(mut self, hook: Arc<dyn BlobCreationHook>) -> Self {
-        self.blob_creation_hooks.push(hook);
+    /// Registers the blob lifecycle dispatcher (thumbnail cleanup, …).
+    pub fn with_blob_lifecycle(mut self, lifecycle: Arc<BlobLifecycleService>) -> Self {
+        self.blob_lifecycle = Some(lifecycle);
         self
     }
 
-    /// Register a [`BlobDeletionHook`] to be called whenever a blob's
-    /// ref_count reaches zero.  Hooks are called in registration order.
-    pub fn add_blob_hook(mut self, hook: Arc<dyn BlobDeletionHook>) -> Self {
-        self.blob_hooks.push(hook);
-        self
-    }
-
-    /// Fire all registered creation hooks for a new blob.
-    async fn fire_blob_creation_hooks(&self, hash: &str, content_type: Option<&str>) {
-        for hook in &self.blob_creation_hooks {
-            hook.on_blob_created(hash, content_type).await;
+    fn fire_blob_creation_hooks(&self, hash: &str, content_type: Option<&str>) {
+        if let Some(lc) = &self.blob_lifecycle {
+            lc.on_blob_created(hash, content_type);
         }
     }
 
-    /// Fire all registered hooks for a deleted blob.
-    async fn fire_blob_hooks(&self, hash: &str) {
-        for hook in &self.blob_hooks {
-            hook.on_blob_deleted(hash).await;
+    fn fire_blob_hooks(&self, hash: &str) {
+        if let Some(lc) = &self.blob_lifecycle {
+            lc.on_blob_deleted(hash);
         }
     }
 
@@ -152,8 +140,7 @@ impl DedupService {
             backend: Arc::new(LocalBlobBackend::new(Path::new("/tmp/oxicloud_stub_blobs"))),
             pool: stub_pool.clone(),
             maintenance_pool: stub_pool,
-            blob_creation_hooks: vec![],
-            blob_hooks: vec![],
+            blob_lifecycle: None,
         }
     }
 
@@ -371,8 +358,7 @@ impl DedupService {
             chunk_hashes.len()
         );
 
-        self.fire_blob_creation_hooks(&file_hash, content_type.as_deref())
-            .await;
+        self.fire_blob_creation_hooks(&file_hash, content_type.as_deref());
 
         Ok(DedupResultDto::NewBlob {
             hash: file_hash,
@@ -813,7 +799,7 @@ impl DedupService {
             }
 
             // Bug 4 fix: notify hooks — e.g. thumbnail cleanup keyed by file_hash
-            self.fire_blob_hooks(file_hash).await;
+            self.fire_blob_hooks(file_hash);
 
             tracing::info!(
                 "MANIFEST DELETED: {} ({} chunks, {} orphan chunks removed)",
@@ -893,7 +879,7 @@ impl DedupService {
             }
 
             // Bug 3 fix: notify hooks — e.g. thumbnail cleanup keyed by hash
-            self.fire_blob_hooks(hash).await;
+            self.fire_blob_hooks(hash);
 
             tracing::info!("BLOB DELETED: {} (no more references)", &hash[..12]);
             Ok(true)
@@ -1000,7 +986,7 @@ impl DedupService {
             if let Err(e) = self.backend.delete_blob(hash).await {
                 tracing::warn!("cleanup_if_orphaned: disk delete failed for {short}: {e}");
             }
-            self.fire_blob_hooks(hash).await;
+            self.fire_blob_hooks(hash);
             tracing::info!("cleanup_if_orphaned: removed orphaned blob {short}");
         }
     }
@@ -1471,7 +1457,7 @@ impl DedupService {
                 if let Err(e) = self.backend.delete_blob(hash).await {
                     tracing::warn!("Failed to delete orphan blob {hash}: {e}");
                 }
-                self.fire_blob_hooks(hash).await;
+                self.fire_blob_hooks(hash);
                 total_bytes += *size as u64;
             }
             total_deleted += batch.len() as u64;

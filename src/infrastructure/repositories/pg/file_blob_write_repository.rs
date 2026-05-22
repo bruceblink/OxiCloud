@@ -202,10 +202,11 @@ impl FileBlobWriteRepository {
 
         Ok(new_hash.to_string())
     }
-}
 
-impl FileWritePort for FileBlobWriteRepository {
-    async fn save_file_from_temp(
+    /// Like [`FileWritePort::save_file_from_temp`] but also returns whether the
+    /// blob was genuinely new (`true`) or a dedup hit (`false`).
+    /// Used by [`FileUploadService`] to pass `is_new_blob` to lifecycle hooks.
+    pub async fn save_file_from_temp_with_dedup(
         &self,
         name: String,
         folder_id: Option<String>,
@@ -213,18 +214,16 @@ impl FileWritePort for FileBlobWriteRepository {
         temp_path: &std::path::Path,
         size: u64,
         pre_computed_hash: Option<String>,
-    ) -> Result<File, DomainError> {
+    ) -> Result<(File, bool), DomainError> {
         let user_id = self.resolve_user_id(folder_id.as_deref()).await?;
 
-        // True streaming: pass pre-computed hash (or let dedup compute it).
-        // When hash is pre-computed, zero extra disk reads.
         let dedup_result = self
             .dedup
             .store_from_file(temp_path, Some(content_type.clone()), pre_computed_hash)
             .await?;
+        let is_new_blob = !dedup_result.was_deduplicated();
         let blob_hash = dedup_result.hash().to_string();
 
-        // Insert file metadata — if this fails, compensate by removing the blob ref
         let row = match sqlx::query_as::<_, (String, i64, i64)>(
             r#"
             INSERT INTO storage.files (name, folder_id, user_id, blob_hash, size, mime_type)
@@ -275,7 +274,7 @@ impl FileWritePort for FileBlobWriteRepository {
         );
 
         let folder_path = self.lookup_folder_path(folder_id.as_deref()).await?;
-        Self::row_to_file(
+        let file = Self::row_to_file(
             row.0,
             name,
             folder_id,
@@ -285,8 +284,32 @@ impl FileWritePort for FileBlobWriteRepository {
             row.1,
             row.2,
             Some(user_id),
-            blob_hash.clone(),
+            blob_hash,
+        )?;
+        Ok((file, is_new_blob))
+    }
+}
+
+impl FileWritePort for FileBlobWriteRepository {
+    async fn save_file_from_temp(
+        &self,
+        name: String,
+        folder_id: Option<String>,
+        content_type: String,
+        temp_path: &std::path::Path,
+        size: u64,
+        pre_computed_hash: Option<String>,
+    ) -> Result<File, DomainError> {
+        self.save_file_from_temp_with_dedup(
+            name,
+            folder_id,
+            content_type,
+            temp_path,
+            size,
+            pre_computed_hash,
         )
+        .await
+        .map(|(file, _)| file)
     }
 
     async fn move_file(

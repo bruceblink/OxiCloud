@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::application::ports::file_lifecycle::FileLifecycleHook;
 use crate::common::errors::DomainError;
 
 #[derive(Debug, FromRow)]
@@ -231,6 +232,101 @@ impl AudioMetadataService {
             failed,
         })
     }
+
+    /// Copy audio metadata from an existing file that shares the same blob.
+    ///
+    /// Used when `is_new_blob=false` (copy/dedup hit): instead of re-parsing
+    /// the blob, clone the existing metadata row for `new_file_id`. Falls back
+    /// Clones audio metadata from a known source file, falling back to
+    /// [`clone_or_extract_background`] if the source has not been processed yet.
+    pub fn clone_from_source_background(
+        service: Arc<Self>,
+        new_file_id: Uuid,
+        source_file_id: Uuid,
+        blob_hash: String,
+    ) {
+        tokio::spawn(async move {
+            let result = sqlx::query(
+                r#"
+                INSERT INTO audio.file_metadata
+                    (file_id, title, artist, album, album_artist, genre,
+                     track_number, disc_number, year, duration_secs, format)
+                SELECT $1, title, artist, album, album_artist, genre,
+                    track_number, disc_number, year, duration_secs, format
+                FROM audio.file_metadata
+                WHERE file_id = $2
+                ON CONFLICT (file_id) DO NOTHING
+                "#,
+            )
+            .bind(new_file_id)
+            .bind(source_file_id)
+            .execute(&*service.pool)
+            .await;
+
+            match result {
+                Ok(r) if r.rows_affected() > 0 => {
+                    info!(
+                        "Cloned audio metadata from {} to {}",
+                        source_file_id, new_file_id
+                    );
+                }
+                Ok(_) => {
+                    // Source not yet processed — fall back to blob-hash lookup or extraction.
+                    Self::clone_or_extract_background(service, new_file_id, blob_hash);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to clone audio metadata from {} to {}: {}",
+                        source_file_id, new_file_id, e
+                    );
+                }
+            }
+        });
+    }
+
+    /// to full extraction if no existing row is found (race: original not yet
+    /// processed).
+    pub fn clone_or_extract_background(service: Arc<Self>, new_file_id: Uuid, blob_hash: String) {
+        tokio::spawn(async move {
+            let rows_inserted = sqlx::query(
+                r#"
+                INSERT INTO audio.file_metadata
+                    (file_id, title, artist, album, album_artist, genre,
+                     track_number, disc_number, year, duration_secs, format)
+                SELECT $1, title, artist, album, album_artist, genre,
+                    track_number, disc_number, year, duration_secs, format
+                FROM audio.file_metadata am
+                JOIN storage.files sf ON sf.id = am.file_id
+                WHERE sf.blob_hash = $2
+                LIMIT 1
+                ON CONFLICT (file_id) DO NOTHING
+                "#,
+            )
+            .bind(new_file_id)
+            .bind(&blob_hash)
+            .execute(&*service.pool)
+            .await;
+
+            match rows_inserted {
+                Ok(result) if result.rows_affected() > 0 => {
+                    info!("Cloned audio metadata for file {}", new_file_id);
+                }
+                Ok(_) => {
+                    // No existing metadata found — original not yet processed; fall back.
+                    let file_path = service.blob_path(&blob_hash);
+                    if let Err(e) = service.extract_and_save(&new_file_id, &file_path).await {
+                        warn!(
+                            "Failed to extract audio metadata for {}: {}",
+                            new_file_id, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to clone audio metadata for {}: {}", new_file_id, e);
+                }
+            }
+        });
+    }
 }
 
 /// Extracted audio metadata fields transferred from the blocking thread.
@@ -251,4 +347,80 @@ pub struct MetadataExtractionResult {
     pub total: usize,
     pub processed: usize,
     pub failed: usize,
+}
+
+// ─── FileLifecycleHook ───────────────────────────────────────────────────────
+
+impl FileLifecycleHook for AudioMetadataService {
+    fn on_file_created(
+        &self,
+        file_id: &str,
+        blob_hash: &str,
+        content_type: &str,
+        is_new_blob: bool,
+    ) {
+        if !Self::is_audio_file(content_type) {
+            return;
+        }
+        let Ok(uuid) = file_id.parse::<Uuid>() else {
+            warn!("on_file_created: invalid file_id UUID: {}", file_id);
+            return;
+        };
+        let service = Arc::new(Self {
+            pool: self.pool.clone(),
+            blob_root: self.blob_root.clone(),
+        });
+        if is_new_blob {
+            Self::spawn_extraction_background(service, uuid, self.blob_path(blob_hash));
+        } else {
+            Self::clone_or_extract_background(service, uuid, blob_hash.to_string());
+        }
+    }
+
+    fn on_file_copied(
+        &self,
+        file_id: &str,
+        blob_hash: &str,
+        content_type: &str,
+        source_file_id: &str,
+    ) {
+        if !Self::is_audio_file(content_type) {
+            return;
+        }
+        let Ok(uuid) = file_id.parse::<Uuid>() else {
+            warn!("on_file_copied: invalid file_id UUID: {}", file_id);
+            return;
+        };
+        let Ok(source_uuid) = source_file_id.parse::<Uuid>() else {
+            warn!(
+                "on_file_copied: invalid source_file_id UUID: {}",
+                source_file_id
+            );
+            return;
+        };
+        let service = Arc::new(Self {
+            pool: self.pool.clone(),
+            blob_root: self.blob_root.clone(),
+        });
+        Self::clone_from_source_background(service, uuid, source_uuid, blob_hash.to_string());
+    }
+
+    fn on_file_updated(&self, file_id: &str, blob_hash: &str, content_type: &str) {
+        if !Self::is_audio_file(content_type) {
+            return;
+        }
+        let Ok(uuid) = file_id.parse::<Uuid>() else {
+            warn!("on_file_updated: invalid file_id UUID: {}", file_id);
+            return;
+        };
+        let service = Arc::new(Self {
+            pool: self.pool.clone(),
+            blob_root: self.blob_root.clone(),
+        });
+        Self::spawn_extraction_with_delete_background(service, uuid, self.blob_path(blob_hash));
+    }
+
+    fn on_file_deleted(&self, _file_id: &str) {
+        // audio.file_metadata has ON DELETE CASCADE on file_id — DB handles cleanup.
+    }
 }

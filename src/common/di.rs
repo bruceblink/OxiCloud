@@ -42,6 +42,7 @@ use crate::infrastructure::services::pg_acl_engine::PgAclEngine;
 use crate::infrastructure::services::trash_cleanup_service::TrashCleanupService;
 
 use crate::application::services::app_password_service::AppPasswordService;
+use crate::application::services::blob_lifecycle_service::BlobLifecycleService;
 use crate::application::services::calendar_service::CalendarService;
 use crate::application::services::device_auth_service::DeviceAuthService;
 use crate::application::services::file_lifecycle_service::FileLifecycleService;
@@ -260,6 +261,12 @@ impl AppServiceFactory {
             tracing::info!("Blob storage LRU disk cache enabled");
         }
 
+        // Blob lifecycle — thumbnail disk-file cleanup when blob ref_count hits zero.
+        // ThumbnailService (not ThumbnailRefreshHook) is used here to avoid a circular
+        // Arc: DedupService→BlobLifecycleService→ThumbnailRefreshHook→DedupService.
+        let blob_lifecycle =
+            Arc::new(BlobLifecycleService::new().with_hook(thumbnail_service.clone()));
+
         // Deduplication service — PRIMARY blob storage engine (PostgreSQL-backed index)
         let dedup_service = Arc::new(
             crate::infrastructure::services::dedup_service::DedupService::new(
@@ -267,7 +274,7 @@ impl AppServiceFactory {
                 db_pool.clone(),
                 maintenance_pool.clone(),
             )
-            .add_blob_hook(thumbnail_service.clone()),
+            .with_blob_lifecycle(blob_lifecycle),
         );
         dedup_service.initialize().await?;
 
@@ -275,14 +282,30 @@ impl AppServiceFactory {
             "Core services initialized: path service, file content cache, thumbnails, chunked upload, image transcode, dedup (PRIMARY blob storage)"
         );
 
-        let file_lifecycle =
-            Arc::new(FileLifecycleService::new().with_deleted_hook(thumbnail_service.clone()));
+        // Audio metadata service — created here so it can be wired into file_lifecycle.
+        let audio_metadata_service = self.create_audio_metadata_service(db_pool);
+
+        // ThumbnailRefreshHook: handles FileLifecycleHook events (create/update/delete).
+        // Implemented on ThumbnailRefreshHook (not ThumbnailService) to avoid circular Arc:
+        //   DedupService → BlobLifecycleService → ThumbnailRefreshHook → DedupService.
+        let thumbnail_refresh_hook = Arc::new(ThumbnailRefreshHook::new(
+            thumbnail_service.clone(),
+            dedup_service.clone(),
+        ));
+
+        // Build the unified FileLifecycleService dispatcher.
+        let mut fls = FileLifecycleService::new().with_hook(thumbnail_refresh_hook);
+        if let Some(audio) = &audio_metadata_service {
+            fls = fls.with_hook(audio.clone());
+        }
+        let file_lifecycle = Arc::new(fls);
 
         Ok(CoreServices {
             path_service,
             file_content_cache,
             thumbnail_service,
             file_lifecycle,
+            audio_metadata_service,
             chunked_upload_service,
             image_transcode_service,
             dedup_service,
@@ -355,7 +378,6 @@ impl AppServiceFactory {
         core: &CoreServices,
         repos: &RepositoryServices,
         trash_service: Option<Arc<TrashService>>,
-        db_pool: &Arc<PgPool>,
         authz: &Arc<PgAclEngine>,
     ) -> ApplicationServices {
         // Main services
@@ -364,20 +386,13 @@ impl AppServiceFactory {
             authz.clone(),
         ));
 
-        // Refactored services with all infrastructure ports
-        // In blob model, dedup is handled by the repository — no separate write-behind needed
-        let thumbnail_refresh_hook = Arc::new(ThumbnailRefreshHook::new(
-            core.thumbnail_service.clone(),
-            core.dedup_service.clone(),
-        ));
         let file_upload_service = Arc::new(
             FileUploadService::new_with_read(
                 repos.file_write_repository.clone(),
                 repos.file_read_repository.clone(),
             )
             .with_content_cache(core.file_content_cache.clone())
-            .with_file_created_hook(thumbnail_refresh_hook.clone())
-            .with_file_updated_hook(thumbnail_refresh_hook),
+            .with_file_lifecycle_hook(core.file_lifecycle.clone()),
         );
 
         let file_retrieval_service = Arc::new(FileRetrievalService::new_with_cache(
@@ -397,7 +412,7 @@ impl AppServiceFactory {
                 Some(core.file_content_cache.clone()),
                 authz.clone(),
             )
-            .with_file_deleted_hook(core.file_lifecycle.clone()),
+            .with_file_lifecycle_hook(core.file_lifecycle.clone()),
         );
 
         let file_use_case_factory = Arc::new(AppFileUseCaseFactory::new(
@@ -433,7 +448,7 @@ impl AppServiceFactory {
             share_service: None,     // Configured later with create_share_service
             favorites_service: None, // Configured later with create_favorites_service
             recent_service: None,    // Configured later with create_recent_service
-            audio_metadata_service: self.create_audio_metadata_service(db_pool),
+            audio_metadata_service: core.audio_metadata_service.clone(),
         }
     }
 
@@ -633,13 +648,8 @@ impl AppServiceFactory {
             .await;
 
         // 4. Application services (with trash + authz already wired)
-        let mut apps = self.create_application_services(
-            &core,
-            &repos,
-            trash_service.clone(),
-            &pool,
-            &authorization,
-        );
+        let mut apps =
+            self.create_application_services(&core, &repos, trash_service.clone(), &authorization);
 
         // 5. Share service
         let share_service = self.create_share_service(&repos, &pool);
@@ -1028,8 +1038,9 @@ pub struct CoreServices {
     pub path_service: Arc<PathService>,
     pub file_content_cache: Arc<FileContentCache>,
     pub thumbnail_service: Arc<ThumbnailService>,
-    /// Composite lifecycle dispatcher — register new permanent-delete hooks here only.
+    /// Composite lifecycle dispatcher — wires thumbnails + audio metadata for all file events.
     pub file_lifecycle: Arc<FileLifecycleService>,
+    pub audio_metadata_service: Option<Arc<AudioMetadataService>>,
     pub chunked_upload_service: Arc<ChunkedUploadService>,
     pub image_transcode_service: Arc<ImageTranscodeService>,
     pub dedup_service: Arc<DedupService>,

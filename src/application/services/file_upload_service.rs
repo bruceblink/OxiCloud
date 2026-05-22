@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::application::dtos::file_dto::FileDto;
-use crate::application::ports::file_lifecycle::{FileCreatedHook, FileUpdatedHook};
+use crate::application::ports::file_lifecycle::FileLifecycleHook;
 use crate::application::ports::file_ports::FileUploadUseCase;
 use crate::application::ports::storage_ports::{FileReadPort, FileWritePort};
 use crate::application::services::storage_usage_service::StorageUsageService;
@@ -53,10 +53,8 @@ pub struct FileUploadService {
     storage_usage_service: Option<Arc<StorageUsageService>>,
     /// Content cache — invalidated on file update so stale content is never served.
     content_cache: Option<Arc<FileContentCache>>,
-    /// Hooks fired after a new file record is created.
-    file_created_hooks: Vec<Arc<dyn FileCreatedHook>>,
-    /// Hooks fired after a file's blob is replaced (e.g. thumbnail refresh).
-    file_updated_hooks: Vec<Arc<dyn FileUpdatedHook>>,
+    /// Single lifecycle dispatcher — fires on_file_created / on_file_updated.
+    file_lifecycle_hook: Option<Arc<dyn FileLifecycleHook>>,
 }
 
 impl FileUploadService {
@@ -67,8 +65,7 @@ impl FileUploadService {
             file_read: None,
             storage_usage_service: None,
             content_cache: None,
-            file_created_hooks: Vec::new(),
-            file_updated_hooks: Vec::new(),
+            file_lifecycle_hook: None,
         }
     }
 
@@ -82,8 +79,7 @@ impl FileUploadService {
             file_read: Some(file_read),
             storage_usage_service: None,
             content_cache: None,
-            file_created_hooks: Vec::new(),
-            file_updated_hooks: Vec::new(),
+            file_lifecycle_hook: None,
         }
     }
 
@@ -93,15 +89,9 @@ impl FileUploadService {
         self
     }
 
-    /// Registers a hook to fire after a new file record is created.
-    pub fn with_file_created_hook(mut self, hook: Arc<dyn FileCreatedHook>) -> Self {
-        self.file_created_hooks.push(hook);
-        self
-    }
-
-    /// Registers a hook to fire after a file's blob is replaced.
-    pub fn with_file_updated_hook(mut self, hook: Arc<dyn FileUpdatedHook>) -> Self {
-        self.file_updated_hooks.push(hook);
+    /// Registers the lifecycle hook dispatcher (thumbnails, audio metadata, …).
+    pub fn with_file_lifecycle_hook(mut self, hook: Arc<dyn FileLifecycleHook>) -> Self {
+        self.file_lifecycle_hook = Some(hook);
         self
     }
 
@@ -153,9 +143,9 @@ impl FileUploadUseCase for FileUploadService {
         size: u64,
         pre_computed_hash: Option<String>,
     ) -> Result<FileDto, DomainError> {
-        let file = self
+        let (file, is_new_blob) = self
             .file_write
-            .save_file_from_temp(
+            .save_file_from_temp_with_dedup(
                 name.clone(),
                 folder_id,
                 content_type,
@@ -170,9 +160,8 @@ impl FileUploadUseCase for FileUploadService {
             name, size, dto.id
         );
         self.maybe_update_storage_usage(&dto);
-        for hook in &self.file_created_hooks {
-            hook.on_file_created(&dto.id, &dto.etag, &dto.mime_type)
-                .await;
+        if let Some(hook) = &self.file_lifecycle_hook {
+            hook.on_file_created(&dto.id, &dto.etag, &dto.mime_type, is_new_blob);
         }
         Ok(dto)
     }
@@ -222,7 +211,6 @@ impl FileUploadUseCase for FileUploadService {
         // Look up the folder ID by folder path
         let parent_id = if !parent_path.is_empty() {
             if let Some(file_read) = &self.file_read {
-                // Use get_folder_id_by_path to look up the folder directly
                 file_read.get_folder_id_by_path(parent_path).await.ok()
             } else {
                 None
@@ -241,9 +229,9 @@ impl FileUploadUseCase for FileUploadService {
             .await
             .map_err(|e| DomainError::internal_error("FileUpload", format!("hash: {e}")))?;
 
-        let file = self
+        let (file, is_new_blob) = self
             .file_write
-            .save_file_from_temp(
+            .save_file_from_temp_with_dedup(
                 filename.to_string(),
                 parent_id,
                 content_type.to_string(),
@@ -254,6 +242,9 @@ impl FileUploadUseCase for FileUploadService {
             .await?;
         let dto = FileDto::from(file);
         self.maybe_update_storage_usage(&dto);
+        if let Some(hook) = &self.file_lifecycle_hook {
+            hook.on_file_created(&dto.id, &dto.etag, &dto.mime_type, is_new_blob);
+        }
         Ok(dto)
     }
 
@@ -327,9 +318,8 @@ impl FileUploadUseCase for FileUploadService {
             // Re-read to get fresh DTO with updated etag and timestamps.
             let updated = file_read.get_file(&file_id).await?;
             let dto = FileDto::from(updated);
-            for hook in &self.file_updated_hooks {
-                hook.on_file_updated(&file_id, &dto.etag, content_type)
-                    .await;
+            if let Some(hook) = &self.file_lifecycle_hook {
+                hook.on_file_updated(&file_id, &dto.etag, content_type);
             }
             return Ok(dto);
         }
@@ -354,9 +344,9 @@ impl FileUploadUseCase for FileUploadService {
             None
         };
 
-        let created = self
+        let (created, is_new_blob) = self
             .file_write
-            .save_file_from_temp(
+            .save_file_from_temp_with_dedup(
                 filename.to_string(),
                 parent_id,
                 content_type.to_string(),
@@ -365,6 +355,10 @@ impl FileUploadUseCase for FileUploadService {
                 pre_computed_hash,
             )
             .await?;
-        Ok(FileDto::from(created))
+        let dto = FileDto::from(created);
+        if let Some(hook) = &self.file_lifecycle_hook {
+            hook.on_file_created(&dto.id, &dto.etag, content_type, is_new_blob);
+        }
+        Ok(dto)
     }
 }

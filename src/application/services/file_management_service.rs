@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::application::dtos::file_dto::FileDto;
 use crate::application::ports::authorization_ports::AuthorizationEngine;
-use crate::application::ports::file_lifecycle::FileDeletedHook;
+use crate::application::ports::file_lifecycle::FileLifecycleHook;
 use crate::application::ports::file_ports::FileManagementUseCase;
 use crate::application::ports::storage_ports::{CopyFolderTreeResult, FileWritePort};
 use crate::application::ports::trash_ports::TrashUseCase;
@@ -29,8 +29,8 @@ pub struct FileManagementService {
     trash_service: Option<Arc<TrashService>>,
     content_cache: Option<Arc<FileContentCache>>,
     authz: Arc<PgAclEngine>,
-    /// Hook fired after a file is permanently deleted (typically the FileLifecycleService composite).
-    file_deleted_hook: Option<Arc<dyn FileDeletedHook>>,
+    /// Lifecycle hook dispatcher — fired on file created (copy) and deleted.
+    file_lifecycle_hook: Option<Arc<dyn FileLifecycleHook>>,
 }
 
 impl FileManagementService {
@@ -52,13 +52,13 @@ impl FileManagementService {
             trash_service,
             content_cache,
             authz,
-            file_deleted_hook: None,
+            file_lifecycle_hook: None,
         }
     }
 
-    /// Sets the lifecycle hook fired after a file is permanently deleted.
-    pub fn with_file_deleted_hook(mut self, hook: Arc<dyn FileDeletedHook>) -> Self {
-        self.file_deleted_hook = Some(hook);
+    /// Sets the lifecycle hook dispatcher (thumbnails, audio metadata, …).
+    pub fn with_file_lifecycle_hook(mut self, hook: Arc<dyn FileLifecycleHook>) -> Self {
+        self.file_lifecycle_hook = Some(hook);
         self
     }
 
@@ -149,7 +149,11 @@ impl FileManagementService {
             copied_file.folder_id()
         );
 
-        Ok(FileDto::from(copied_file))
+        let dto = FileDto::from(copied_file);
+        if let Some(hook) = &self.file_lifecycle_hook {
+            hook.on_file_copied(&dto.id, &dto.etag, &dto.mime_type, file_id);
+        }
+        Ok(dto)
     }
 
     async fn rename_file(&self, file_id: &str, new_name: &str) -> Result<FileDto, DomainError> {
@@ -185,8 +189,8 @@ impl FileManagementService {
         if let Some(cc) = &self.content_cache {
             cc.invalidate(id).await;
         }
-        if let Some(hook) = &self.file_deleted_hook {
-            hook.on_file_deleted(id).await;
+        if let Some(hook) = &self.file_lifecycle_hook {
+            hook.on_file_deleted(id);
         }
         info!("File permanently deleted: {}", id);
         Ok(())

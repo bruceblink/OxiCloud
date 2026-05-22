@@ -1,35 +1,26 @@
-use std::future::Future;
-use std::pin::Pin;
+/// Observer notified by [`DedupService`] when a blob is stored for the first
+/// time or permanently removed (ref_count reaches zero).
+///
+/// Register with [`BlobLifecycleService`] during DI wiring; it fans out to all
+/// registered hooks. Every implementor **must** provide both methods —
+/// use an explicit one-liner noop for events the implementor does not care about.
+/// This forces conscious acknowledgement of every lifecycle event rather than
+/// silent omission.
+///
+/// All methods are synchronous. Background work must be spawned inside the
+/// implementor via `tokio::spawn`; the calling service never awaits hook
+/// completion.
+pub trait BlobLifecycleHook: Send + Sync {
+    /// Called after a genuinely new blob has been written to storage (no dedup
+    /// hit — first time this content hash is seen).
+    ///
+    /// `blob_hash` — BLAKE3 hex identifying the blob.
+    /// `content_type` — MIME type if known at write time, `None` otherwise.
+    fn on_blob_created(&self, blob_hash: &str, content_type: Option<&str>);
 
-/// Observer notified by [`DedupService`] when a genuinely new blob is stored
-/// for the first time (no dedup hit).
-///
-/// Register with [`DedupService::add_blob_creation_hook`] during DI wiring.
-pub trait BlobCreationHook: Send + Sync {
-    /// Called after the new blob's chunks and manifest have been written.
-    /// `blob_hash` is the BLAKE3 hex, `content_type` is the MIME type if known.
-    /// Must be best-effort — must not propagate errors.
-    fn on_blob_created<'a>(
-        &'a self,
-        blob_hash: &'a str,
-        content_type: Option<&'a str>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-}
-/// Observer notified by [`DedupService`] when a blob's ref_count reaches zero
-/// and it is permanently removed from storage.
-///
-/// Implement this trait on any service that needs to react to blob deletion
-/// (e.g. thumbnail cleanup, CDN invalidation, audit logging).  Register with
-/// [`DedupService::add_blob_hook`] during DI wiring.
-///
-/// The boxed-future return keeps the trait dyn-compatible so multiple
-/// implementations can be stored as `Vec<Arc<dyn BlobDeletionHook>>`.
-pub trait BlobDeletionHook: Send + Sync {
-    /// Called after the blob file has been removed from disk.
-    /// `blob_hash` is the BLAKE3 hex string identifying the blob.
-    /// Must be best-effort — must not propagate errors.
-    fn on_blob_deleted<'a>(
-        &'a self,
-        blob_hash: &'a str,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    /// Called after a blob's ref_count reaches zero and it has been permanently
+    /// removed from storage.
+    ///
+    /// `blob_hash` — BLAKE3 hex identifying the (now deleted) blob.
+    fn on_blob_deleted(&self, blob_hash: &str);
 }

@@ -18,7 +18,6 @@ use crate::application::ports::storage_ports::{FileReadPort, StorageUsagePort};
 use crate::application::ports::thumbnail_ports::ThumbnailPort;
 use crate::application::ports::{file_ports::OptimizedFileContent, folder_ports::FolderUseCase};
 use crate::common::di::AppState;
-use crate::infrastructure::services::audio_metadata_service::AudioMetadataService;
 use crate::interfaces::errors::AppError;
 use crate::interfaces::middleware::auth::AuthUser;
 use crate::{application::dtos::file_dto::FileDto, domain::services::authorization::Permission};
@@ -781,60 +780,10 @@ impl FileHandler {
         auth_user: AuthUser,
         multipart: Multipart,
     ) -> impl IntoResponse {
-        let (file, blob_hash) = match Self::upload_file_inner(&state, &auth_user, multipart).await {
+        let (file, _) = match Self::upload_file_inner(&state, &auth_user, multipart).await {
             Ok(pair) => pair,
             Err(response) => return response.into_response(),
         };
-
-        // Generate thumbnails for supported images in background.
-        // The blob_hash was already computed during the hash-on-write spool,
-        // so we can reconstruct the source bytes directly from DedupService
-        // without an extra DB round-trip.
-        if state
-            .core
-            .thumbnail_service
-            .is_supported_image(&file.mime_type)
-        {
-            let file_id = file.id.clone();
-            let thumbnail_service = state.core.thumbnail_service.clone();
-            let dedup_service = state.core.dedup_service.clone();
-            let blob_hash_owned = blob_hash.clone();
-
-            tokio::spawn(async move {
-                tracing::info!("🖼️ Generating thumbnails for: {}", file_id);
-                match dedup_service.read_blob_bytes(&blob_hash_owned).await {
-                    Ok(original_bytes) => {
-                        thumbnail_service.generate_all_sizes_background_from_bytes(
-                            file_id,
-                            blob_hash_owned,
-                            original_bytes,
-                            dedup_service.clone(),
-                        );
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            "Failed to load source image for thumbnail generation {}: {}",
-                            file_id,
-                            err
-                        );
-                    }
-                }
-            });
-        }
-
-        // TODO: same remark: a hook to handle easily audio service
-        // Extract audio metadata for supported audio files in background.
-        if let Some(ref audio_service) = state.applications.audio_metadata_service
-            && AudioMetadataService::is_audio_file(&file.mime_type)
-            && let Ok(file_id) = uuid::Uuid::parse_str(&file.id)
-        {
-            let file_path = state.core.dedup_service.blob_path(&blob_hash);
-            AudioMetadataService::spawn_extraction_background(
-                audio_service.clone(),
-                file_id,
-                file_path,
-            );
-        }
 
         Self::created_json_response(&file).into_response()
     }

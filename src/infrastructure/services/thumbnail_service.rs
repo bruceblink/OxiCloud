@@ -984,23 +984,12 @@ impl ThumbnailService {
     }
 }
 
-// ─── BlobDeletionHook ────────────────────────────────────────────────────────
+// ─── FileLifecycleHook + BlobLifecycleHook ───────────────────────────────────
 
-impl crate::application::ports::blob_lifecycle::BlobDeletionHook for ThumbnailService {
-    fn on_blob_deleted<'a>(
-        &'a self,
-        blob_hash: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move { self.delete_blob_thumbnails(blob_hash).await })
-    }
-}
-
-// ─── FileUpdatedHook ─────────────────────────────────────────────────────────
-
-/// Wires thumbnail invalidation + regeneration into the file-update lifecycle.
+/// Wires all thumbnail side-effects into the file and blob lifecycle.
 ///
-/// Registered on [`FileUploadService`] during DI. Fires whenever a file's blob
-/// is replaced (WebDAV PUT overwrite, WOPI PutFile, Nextcloud chunked upload).
+/// Registered once on both [`FileLifecycleService`] and [`BlobLifecycleService`]
+/// during DI. Handles thumbnail generation, invalidation, and cleanup.
 pub struct ThumbnailRefreshHook {
     thumbnail: Arc<ThumbnailService>,
     dedup: Arc<DedupService>,
@@ -1012,54 +1001,70 @@ impl ThumbnailRefreshHook {
     }
 }
 
-impl crate::application::ports::file_lifecycle::FileUpdatedHook for ThumbnailRefreshHook {
-    fn on_file_updated<'a>(
-        &'a self,
-        file_id: &'a str,
-        blob_hash: &'a str,
-        content_type: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if !ThumbnailService::is_supported_image(content_type) {
-                return;
-            }
-            if let Err(e) = self.thumbnail.delete_thumbnails(file_id).await {
+impl crate::application::ports::file_lifecycle::FileLifecycleHook for ThumbnailRefreshHook {
+    fn on_file_created(
+        &self,
+        file_id: &str,
+        blob_hash: &str,
+        content_type: &str,
+        is_new_blob: bool,
+    ) {
+        // Blob-hash thumbnail already exists on disk when is_new_blob=false — skip.
+        if !is_new_blob || !ThumbnailService::is_supported_image(content_type) {
+            return;
+        }
+        Self::spawn_thumbnail_generation(
+            self.thumbnail.clone(),
+            self.dedup.clone(),
+            file_id.to_string(),
+            blob_hash.to_string(),
+        );
+    }
+
+    fn on_file_copied(
+        &self,
+        _file_id: &str,
+        _blob_hash: &str,
+        _content_type: &str,
+        _source_file_id: &str,
+    ) {
+        // Thumbnails are keyed by blob_hash on disk — the copy shares them automatically.
+    }
+
+    fn on_file_updated(&self, file_id: &str, blob_hash: &str, content_type: &str) {
+        if !ThumbnailService::is_supported_image(content_type) {
+            return;
+        }
+        let thumbnail = self.thumbnail.clone();
+        let file_id = file_id.to_string();
+        let blob_hash = blob_hash.to_string();
+        let dedup = self.dedup.clone();
+        tokio::spawn(async move {
+            if let Err(e) = thumbnail.delete_thumbnails(&file_id).await {
                 tracing::warn!(
                     "Failed to invalidate thumbnail cache for {}: {}",
                     file_id,
                     e
                 );
             }
-            Self::spawn_thumbnail_generation(
-                self.thumbnail.clone(),
-                self.dedup.clone(),
-                file_id.to_string(),
-                blob_hash.to_string(),
-            );
-        })
+            Self::spawn_thumbnail_generation(thumbnail, dedup, file_id, blob_hash);
+        });
+    }
+
+    fn on_file_deleted(&self, file_id: &str) {
+        let thumbnail = self.thumbnail.clone();
+        let file_id = file_id.to_string();
+        tokio::spawn(async move {
+            if let Err(e) = thumbnail.delete_thumbnails(&file_id).await {
+                tracing::warn!("Failed to delete thumbnails for file {}: {}", file_id, e);
+            }
+        });
     }
 }
 
-impl crate::application::ports::file_lifecycle::FileCreatedHook for ThumbnailRefreshHook {
-    fn on_file_created<'a>(
-        &'a self,
-        file_id: &'a str,
-        blob_hash: &'a str,
-        content_type: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if !ThumbnailService::is_supported_image(content_type) {
-                return;
-            }
-            Self::spawn_thumbnail_generation(
-                self.thumbnail.clone(),
-                self.dedup.clone(),
-                file_id.to_string(),
-                blob_hash.to_string(),
-            );
-        })
-    }
-}
+// BlobLifecycleHook is implemented on ThumbnailService (not ThumbnailRefreshHook)
+// to avoid a circular Arc: DedupService→BlobLifecycleService→ThumbnailRefreshHook→DedupService.
+// ThumbnailService does not hold DedupService so no cycle exists.
 
 impl ThumbnailRefreshHook {
     fn spawn_thumbnail_generation(
@@ -1085,18 +1090,31 @@ impl ThumbnailRefreshHook {
     }
 }
 
-// ─── FileDeletedHook ─────────────────────────────────────────────────────────
+// ─── BlobLifecycleHook ───────────────────────────────────────────────────────
 
-impl crate::application::ports::file_lifecycle::FileDeletedHook for ThumbnailService {
-    fn on_file_deleted<'a>(
-        &'a self,
-        file_id: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Err(e) = self.delete_thumbnails(file_id).await {
-                tracing::warn!("Failed to delete thumbnails for file {}: {}", file_id, e);
+impl crate::application::ports::blob_lifecycle::BlobLifecycleHook for ThumbnailService {
+    fn on_blob_created(&self, _blob_hash: &str, _content_type: Option<&str>) {
+        // Thumbnail generation is driven by file-level events (on_file_created).
+    }
+
+    fn on_blob_deleted(&self, blob_hash: &str) {
+        // delete_blob_thumbnails only needs thumbnails_root — capture it to avoid Arc cycle.
+        let root = self.thumbnails_root.clone();
+        let blob_hash = blob_hash.to_string();
+        tokio::spawn(async move {
+            for size in ThumbnailSize::all() {
+                let path = root
+                    .join(size.dir_name())
+                    .join(format!("{}.jpg", &blob_hash));
+                if tokio::fs::metadata(&path).await.is_ok() {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
             }
-        })
+            tracing::debug!(
+                "🗑️ Deleted blob thumbnails for hash: {}…",
+                &blob_hash[..blob_hash.len().min(12)]
+            );
+        });
     }
 }
 

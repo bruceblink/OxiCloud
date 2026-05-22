@@ -1,17 +1,15 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::application::ports::file_lifecycle::FileDeletedHook;
+use crate::application::ports::file_lifecycle::FileLifecycleHook;
 
 /// Composite dispatcher for file lifecycle events.
 ///
-/// Aggregates all `FileDeletedHook` implementations and fans out each event to
-/// every registered handler. Services hold a single `Arc<dyn FileDeletedHook>`
-/// pointing here — new handlers are added once, in DI, without touching the
-/// services themselves.
+/// Aggregates all [`FileLifecycleHook`] implementations and fans out each
+/// event to every registered handler. Services hold a single
+/// `Arc<FileLifecycleService>` — new handlers are added once, in DI, without
+/// touching the services themselves.
 pub struct FileLifecycleService {
-    deleted: Vec<Arc<dyn FileDeletedHook>>,
+    hooks: Vec<Arc<dyn FileLifecycleHook>>,
 }
 
 impl Default for FileLifecycleService {
@@ -22,26 +20,49 @@ impl Default for FileLifecycleService {
 
 impl FileLifecycleService {
     pub fn new() -> Self {
-        Self {
-            deleted: Vec::new(),
-        }
+        Self { hooks: Vec::new() }
     }
 
-    pub fn with_deleted_hook(mut self, hook: Arc<dyn FileDeletedHook>) -> Self {
-        self.deleted.push(hook);
+    pub fn with_hook(mut self, hook: Arc<dyn FileLifecycleHook>) -> Self {
+        self.hooks.push(hook);
         self
     }
 }
 
-impl FileDeletedHook for FileLifecycleService {
-    fn on_file_deleted<'a>(
-        &'a self,
-        file_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            for hook in &self.deleted {
-                hook.on_file_deleted(file_id).await;
-            }
-        })
+impl FileLifecycleHook for FileLifecycleService {
+    fn on_file_created(
+        &self,
+        file_id: &str,
+        blob_hash: &str,
+        content_type: &str,
+        is_new_blob: bool,
+    ) {
+        for hook in &self.hooks {
+            hook.on_file_created(file_id, blob_hash, content_type, is_new_blob);
+        }
+    }
+
+    fn on_file_copied(
+        &self,
+        file_id: &str,
+        blob_hash: &str,
+        content_type: &str,
+        source_file_id: &str,
+    ) {
+        for hook in &self.hooks {
+            hook.on_file_copied(file_id, blob_hash, content_type, source_file_id);
+        }
+    }
+
+    fn on_file_updated(&self, file_id: &str, blob_hash: &str, content_type: &str) {
+        for hook in &self.hooks {
+            hook.on_file_updated(file_id, blob_hash, content_type);
+        }
+    }
+
+    fn on_file_deleted(&self, file_id: &str) {
+        for hook in &self.hooks {
+            hook.on_file_deleted(file_id);
+        }
     }
 }

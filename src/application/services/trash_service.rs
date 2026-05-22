@@ -7,7 +7,7 @@ use crate::application::dtos::display_helpers::{
 };
 use crate::application::dtos::trash_dto::TrashedItemDto;
 use crate::application::ports::authorization_ports::AuthorizationEngine;
-use crate::application::ports::file_lifecycle::FileDeletedHook;
+use crate::application::ports::file_lifecycle::FileLifecycleHook;
 use crate::application::ports::storage_ports::{FileReadPort, FileWritePort};
 use crate::application::ports::trash_ports::TrashUseCase;
 use crate::common::errors::{DomainError, ErrorKind, Result};
@@ -53,8 +53,8 @@ pub struct TrashService {
     /// orphaned blob files and thumbnails that the PG trigger cannot reach.
     dedup_service: Arc<DedupService>,
 
-    /// Hook fired after a file is permanently deleted (typically the FileLifecycleService composite).
-    file_deleted_hook: Option<Arc<dyn FileDeletedHook>>,
+    /// Lifecycle hook dispatcher — fired on file permanently deleted.
+    file_deleted_hook: Option<Arc<dyn FileLifecycleHook>>,
 
     /// Content cache — invalidated when files are permanently deleted from trash.
     content_cache: Option<Arc<FileContentCache>>,
@@ -91,8 +91,8 @@ impl TrashService {
         }
     }
 
-    /// Sets the lifecycle hook fired after a file is permanently deleted.
-    pub fn with_file_deleted_hook(mut self, hook: Arc<dyn FileDeletedHook>) -> Self {
+    /// Sets the lifecycle hook dispatcher (thumbnails, audio metadata, …).
+    pub fn with_file_deleted_hook(mut self, hook: Arc<dyn FileLifecycleHook>) -> Self {
         self.file_deleted_hook = Some(hook);
         self
     }
@@ -583,7 +583,7 @@ impl TrashUseCase for TrashService {
                         }
 
                         if let Some(hook) = &self.file_deleted_hook {
-                            hook.on_file_deleted(&file_id).await;
+                            hook.on_file_deleted(&file_id);
                         }
                     }
                     TrashedItemType::Folder => {
@@ -723,7 +723,7 @@ impl TrashUseCase for TrashService {
 
         if let Some(hook) = &self.file_deleted_hook {
             for file_id in &trashed_file_ids {
-                hook.on_file_deleted(file_id).await;
+                hook.on_file_deleted(file_id);
             }
         }
 
