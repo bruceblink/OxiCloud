@@ -37,12 +37,29 @@ function _nameFor(c) {
 
 /**
  * Ensure the index is built (idempotent).
+ * After loading contacts from the system address book, the current user
+ * (from localStorage) is injected so owner cells resolve correctly even
+ * when the server-side address book does not include the logged-in user.
  * @returns {Promise<void>}
  */
 async function _ensureIndex() {
     if (_index !== null) return;
     const contacts = await addressBook.listContacts(SYSTEM_BOOK_ID);
     _index = new Map(contacts.map((c) => [c.id, _nameFor(c)]));
+
+    // Inject the current user if they are not already in the index
+    try {
+        const raw = localStorage.getItem('oxicloud_user');
+        if (raw) {
+            const u = /** @type {{id?:string, display_name?:string, username?:string, email?:string}} */ (JSON.parse(raw));
+            if (u?.id && !_index.has(u.id)) {
+                const name = u.display_name || u.username || u.email || `${u.id.slice(0, 8)}…`;
+                _index.set(u.id, name);
+            }
+        }
+    } catch {
+        // localStorage not available or JSON is invalid — silently skip
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

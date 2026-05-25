@@ -388,6 +388,12 @@
     --color-badge-success-fill: #047857;
     --color-badge-success-fill-dark: #064e27;
     --color-badge-success-fill-faint: #f0fdf4;
+    --color-badge-green-bg: #ecfdf5;
+    --color-badge-green-text: #065f46;
+
+    /* Status badge — light mode (orange/coral) */
+    --color-badge-orange-bg: #fff5f3;
+    --color-badge-orange-text: #ff5e3a;
 
     /* Status badge — light mode (error/red) */
     --color-badge-error-border: #fecaca;
@@ -395,6 +401,8 @@
     /* Status badge — light mode (warning/amber) */
     --color-badge-warning-text: #92400e;
     --color-badge-warning-border: #fde68a;
+    --color-badge-amber-bg: #fef3c7;
+    --color-badge-amber-text: #f59e0b;
 
     /* Status badge — light mode (indigo/purple) */
     --color-badge-indigo-bg: #ede9fe;

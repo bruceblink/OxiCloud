@@ -112,6 +112,9 @@ const sharedWithMeView = {
                 ownerTooltip.init(filesList);
             }
 
+            // Fill the Owner column cells (idempotent: skips already-resolved rows).
+            await ui.resolveOwnerCells();
+
             this._setLoadMoreVisible(!!this._nextCursor);
         } catch (err) {
             ui.showError(`

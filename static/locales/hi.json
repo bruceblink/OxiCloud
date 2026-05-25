@@ -270,7 +270,8 @@
             "archive": "संग्रह",
             "installer": "इंस्टॉलर",
             "code": "कोड"
-        }
+        },
+        "owner": "स्वामी"
     },
     "dialogs": {
         "rename_folder": "फ़ोल्डर का नाम बदलें",

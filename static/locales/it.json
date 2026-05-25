@@ -270,7 +270,8 @@
             "archive": "Archivio",
             "installer": "Programma di installazione",
             "code": "Codice"
-        }
+        },
+        "owner": "Proprietario"
     },
     "dialogs": {
         "rename_folder": "Rinomina cartella",

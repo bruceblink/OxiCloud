@@ -270,7 +270,8 @@
             "archive": "Archief",
             "installer": "Installatiebestand",
             "code": "Code"
-        }
+        },
+        "owner": "Eigenaar"
     },
     "dialogs": {
         "rename_folder": "Map hernoemen",

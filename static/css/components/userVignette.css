@@ -1,0 +1,97 @@
+/* ── User Vignette — avatar circle + name inline component ────────────────────
+ *
+ * Reusable component that pairs a coloured initials circle with a display
+ * name resolved asynchronously.  Used in:
+ *  • Owner column (list view, SharedWithMe & Favorites sections)
+ *  • ShareModal member rows, chips, suggestion items
+ *
+ * Sizes: --xs (20 px) · --sm (24 px) · --md (32 px) · --lg (40 px)
+ * Colours: .uv-color-0..4  (applied by JS via _colorIndex(userId) % 5)
+ *
+ * All colours use CSS custom properties — no raw hex / rgb / named values.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.user-vignette {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.user-vignette__avatar {
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    flex-shrink: 0;
+    /* Default size = --sm; overridden by size modifier below */
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+
+.user-vignette__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+/* ── Size variants ─────────────────────────────────────────────────────────── */
+
+.user-vignette--xs .user-vignette__avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 9px;
+}
+
+.user-vignette--sm .user-vignette__avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+
+.user-vignette--md .user-vignette__avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
+}
+
+.user-vignette--lg .user-vignette__avatar {
+    width: 40px;
+    height: 40px;
+    font-size: 15px;
+}
+
+/* ── Colour palette ────────────────────────────────────────────────────────── */
+
+/* Colours are shared with the ShareModal avatar palette.
+   Each class maps to a distinct hue via design-token variables.       */
+
+.uv-color-0 {
+    background: var(--color-badge-indigo-bg);
+    color: var(--color-badge-indigo-text);
+}
+
+.uv-color-1 {
+    background: var(--color-badge-green-bg);
+    color: var(--color-badge-green-text);
+}
+
+.uv-color-2 {
+    background: var(--color-badge-orange-bg);
+    color: var(--color-badge-orange-text);
+}
+
+.uv-color-3 {
+    background: var(--color-badge-blue-bg);
+    color: var(--color-badge-blue-text);
+}
+
+.uv-color-4 {
+    background: var(--color-badge-amber-bg);
+    color: var(--color-badge-amber-text);
+}

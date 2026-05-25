@@ -100,10 +100,30 @@
     min-width: 0;
 }
 
-.list-header > div:nth-child(4),
+/* Size column: always nth-child(5) because .owner-cell is always in the DOM
+   (even when hidden via display:none, it still occupies a child slot). */
+.list-header > div:nth-child(5),
 .files-list-view .file-item .size-cell {
     justify-self: end;
     text-align: right;
+}
+
+/* ── Owner column ─────────────────────────────────────────── */
+
+/* Styles applied whenever the cell is visible (hidden class absent).
+   The .hidden utility class (display:none !important) keeps it invisible
+   by default — it is stamped directly in the HTML templates. */
+.owner-cell {
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Expand the grid track as soon as at least one owner cell is visible. */
+.files-list-view:has(.owner-cell:not(.hidden)) {
+    --files-list-columns: 36px minmax(200px, 2fr) 120px 100px 110px 130px 72px;
 }
 
 .files-list-view {
@@ -271,7 +291,8 @@
 
 /* element hidden on grid view */
 .files-grid-view .file-item .date-cell,
-.files-grid-view .file-item .size-cell {
+.files-grid-view .file-item .size-cell,
+.files-grid-view .file-item .owner-cell {
     display: none;
 }
 /* Selection checkbox */

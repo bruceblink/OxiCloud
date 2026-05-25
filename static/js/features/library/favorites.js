@@ -201,7 +201,7 @@ const favorites = {
             const files = [];
 
             for (const item of this._cache.values()) {
-                // TODO: cast objects, but for that need to review user_id vs owner_id...
+                // owner_id comes from the backend JOIN (actual file/folder owner, not the favoriter)
                 if (item.item_type === 'folder') {
                     folders.push(
                         // FIXME: better to grab the real values
@@ -215,7 +215,7 @@ const favorites = {
                             created_at: item.created_at,
                             icon_class: item.icon_class,
                             icon_special_class: item.icon_special_class,
-                            owner_id: item.user_id,
+                            owner_id: item.owner_id ?? '',
                             is_root: false
                         }
                     );
@@ -234,7 +234,7 @@ const favorites = {
                             size_formatted: item.size_formatted,
                             modified_at: item.modified_at || item.created_at,
                             path: item.item_path || '',
-                            owner_id: item.user_id,
+                            owner_id: item.owner_id ?? '',
                             created_at: item.created_at,
                             sort_date: item.created_at
                         }
@@ -246,6 +246,8 @@ const favorites = {
 
             const filesList = document.getElementById('files-list');
             if (filesList) pathTooltip.init(filesList);
+
+            await ui.resolveOwnerCells();
         } catch (error) {
             console.error('Error displaying favorites:', error);
             if (ui?.showNotification) {

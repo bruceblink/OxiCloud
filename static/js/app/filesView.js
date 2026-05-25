@@ -233,6 +233,7 @@ async function loadFiles(options = { insertHistory: true }) {
         } else {
             ui.renderFolders(folderList);
             ui.renderFiles(fileList);
+            ui.resolveOwnerCells();
 
             // check if a file was provided
             if (app.viewFile) {

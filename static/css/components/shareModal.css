@@ -334,32 +334,8 @@
     color: var(--color-error-text);
 }
 
-/* ── Avatar colour palette (cycled by memberIndex % 5) ──────────────────────── */
-
-.smd-avatar--0 {
-    background: var(--color-badge-indigo-bg);
-    color: var(--color-badge-indigo-text);
-}
-
-.smd-avatar--1 {
-    background: var(--color-badge-success-bg);
-    color: var(--color-badge-success-text);
-}
-
-.smd-avatar--2 {
-    background: var(--color-accent-tint);
-    color: var(--color-accent);
-}
-
-.smd-avatar--3 {
-    background: var(--color-badge-blue-bg);
-    color: var(--color-badge-blue-text);
-}
-
-.smd-avatar--4 {
-    background: var(--color-warning-bg-light);
-    color: var(--color-warning-text-amber);
-}
+/* ── Avatar colour palette ───────────────────────────────────────────────────── */
+/* Colours are provided by .uv-color-0..4 in userVignette.css (shared palette). */
 
 /* ── Fallback when user-directory is unavailable ────────────────────────────── */
 

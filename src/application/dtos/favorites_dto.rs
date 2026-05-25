@@ -51,6 +51,11 @@ pub struct FavoriteItemDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item_path: Option<String>,
 
+    /// UUID of the file/folder's actual owner (may differ from `user_id` when
+    /// the item was shared and then favourited by another user).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<String>,
+
     // ── Pre-computed display fields ──
     /// FontAwesome icon CSS class (e.g. "fas fa-file-image", "fas fa-folder")
     pub icon_class: String,

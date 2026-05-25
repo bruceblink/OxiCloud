@@ -164,6 +164,9 @@ function setCurrentSection(section) {
         sharedWithMeView.hide();
     }
 
+    // Reset owner column — sections that need it re-enable it explicitly below.
+    ui.setOwnerColumnVisible(false);
+
     // Hide photosView when switching to any other section
     if (section !== 'photos' && photosView) {
         photosView.hide();
@@ -211,6 +214,9 @@ function switchToSharedWithMeSection() {
     // Show actions-bar with view toggle (no upload / new-folder in this view)
     setActionsBarMode('sharedwithme');
 
+    // Show the Owner column — names are resolved async after render.
+    ui.setOwnerColumnVisible(true);
+
     // Show the standard files container and respect grid/list preference
     toggleFileContainer(true);
     syncViewContainers();
@@ -226,6 +232,9 @@ function switchToFilesSection() {
 
     // Set actions bar mode
     setActionsBarMode('files', true);
+
+    // Show owner column in the Files section
+    ui.setOwnerColumnVisible(true);
 
     // Show breadcrumb (only in Files view)
     const breadcrumb = document.querySelector('.breadcrumb');
@@ -257,6 +266,9 @@ function switchToFavoritesSection() {
 
     // Set actions bar mode
     setActionsBarMode('favorites');
+
+    // Show the Owner column — names are resolved async after render.
+    ui.setOwnerColumnVisible(true);
 
     // Hide breadcrumb (only shown in Files view)
     const breadcrumb = document.querySelector('.breadcrumb');

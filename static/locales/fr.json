@@ -270,7 +270,8 @@
             "archive": "Archive",
             "installer": "Installateur",
             "code": "Code"
-        }
+        },
+        "owner": "Propriétaire"
     },
     "dialogs": {
         "rename_folder": "Renommer le dossier",

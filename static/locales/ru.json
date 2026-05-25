@@ -270,7 +270,8 @@
             "archive": "Архив",
             "installer": "Установщик",
             "code": "Код"
-        }
+        },
+        "owner": "Владелец"
     },
     "dialogs": {
         "rename_folder": "Переименовать папку",

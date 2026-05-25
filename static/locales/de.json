@@ -270,7 +270,8 @@
             "archive": "Archiv",
             "installer": "Installationsdatei",
             "code": "Code"
-        }
+        },
+        "owner": "Eigentümer"
     },
     "dialogs": {
         "rename_folder": "Ordner umbenennen",

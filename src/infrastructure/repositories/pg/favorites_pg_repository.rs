@@ -38,7 +38,8 @@ impl FavoritesRepositoryPort for FavoritesPgRepository {
                     WHEN uf.item_type = 'folder' THEN fld.path
                     WHEN uf.item_type = 'file'   THEN COALESCE(pfld.path || '/' || f.name, f.name)
                     ELSE NULL
-                END                                             AS "item_path"
+                END                                             AS "item_path",
+                COALESCE(f.user_id, fld.user_id)::TEXT         AS "owner_id"
             FROM auth.user_favorites uf
             LEFT JOIN storage.files   f   ON uf.item_type = 'file'
                                          AND f.id = uf.item_id::UUID
@@ -78,6 +79,7 @@ impl FavoritesRepositoryPort for FavoritesPgRepository {
                     parent_id: row.try_get("parent_id").ok(),
                     modified_at: row.try_get("modified_at").ok(),
                     item_path: row.try_get("item_path").ok(),
+                    owner_id: row.try_get("owner_id").ok(),
                     // Temporary defaults; with_display_fields() computes the real values
                     icon_class: String::new(),
                     icon_special_class: String::new(),

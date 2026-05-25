@@ -270,7 +270,8 @@
             "archive": "بایگانی",
             "installer": "نصب‌کننده",
             "code": "کد"
-        }
+        },
+        "owner": "مالک"
     },
     "dialogs": {
         "rename_folder": "تغییر نام پوشه",

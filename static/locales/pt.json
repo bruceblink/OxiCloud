@@ -270,7 +270,8 @@
             "archive": "Arquivo compactado",
             "installer": "Instalador",
             "code": "Código"
-        }
+        },
+        "owner": "Proprietário"
     },
     "dialogs": {
         "rename_folder": "Renomear pasta",

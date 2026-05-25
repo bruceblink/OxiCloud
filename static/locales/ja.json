@@ -270,7 +270,8 @@
             "archive": "アーカイブ",
             "installer": "インストーラー",
             "code": "コード"
-        }
+        },
+        "owner": "オーナー"
     },
     "dialogs": {
         "rename_folder": "フォルダ名を変更",

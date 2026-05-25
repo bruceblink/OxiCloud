@@ -270,7 +270,8 @@
             "archive": "压缩文件",
             "installer": "安装程序",
             "code": "代码"
-        }
+        },
+        "owner": "所有者"
     },
     "dialogs": {
         "rename_folder": "重命名文件夹",

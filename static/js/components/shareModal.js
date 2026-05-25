@@ -21,6 +21,7 @@ import { addressBook, SYSTEM_BOOK_ID } from '../model/addressBook.js';
 import { grants } from '../model/grants.js';
 import { systemUsers } from '../model/systemUsers.js';
 import { Modal } from './modal.js';
+import { _colorIndex, _initials } from './userVignette.js';
 
 /** @import {FileItem, FolderItem, Grant, ContactItem, MemberEntry, LinkEntry, DraftLink, ShareRoleEnum} from '../core/types.js' */
 
@@ -71,17 +72,6 @@ function _buildMembers(grantList) {
         });
     }
     return members;
-}
-
-/**
- * Get initials for an avatar (up to 2 chars).
- * @param {string} name
- * @returns {string}
- */
-function _initials(name) {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -291,7 +281,16 @@ const shareModal = {
             }
             debounce = setTimeout(async () => {
                 const results = await addressBook.searchContacts(q, [SYSTEM_BOOK_ID]);
-                this._renderSuggestions(dropdown, results.slice(0, 8), (contact) => {
+                // Filter out the currently logged-in user — they cannot share with themselves
+                const currentUserId = (() => {
+                    try {
+                        return /** @type {{id?:string}} */ (JSON.parse(localStorage.getItem('oxicloud_user') ?? '{}'))?.id ?? null;
+                    } catch {
+                        return null;
+                    }
+                })();
+                const filtered = currentUserId ? results.filter((c) => c.id !== currentUserId) : results;
+                this._renderSuggestions(dropdown, filtered.slice(0, 8), (contact) => {
                     this._stageUser(contact, input, dropdown, addBtn);
                 });
             }, 200);
@@ -332,13 +331,13 @@ const shareModal = {
             container.classList.add('hidden');
             return;
         }
-        results.forEach((c, i) => {
+        results.forEach((c) => {
             const item = document.createElement('div');
             item.className = 'smd-suggestion-item';
             item.tabIndex = 0;
 
             const avatar = document.createElement('div');
-            avatar.className = `smd-suggestion-avatar smd-avatar--${i % 5}`;
+            avatar.className = `smd-suggestion-avatar uv-color-${_colorIndex(c.id)}`;
             const displayName = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.full_name || c.id.slice(0, 8);
             avatar.textContent = _initials(displayName);
 
@@ -411,12 +410,12 @@ const shareModal = {
      */
     _renderChipsInto(container) {
         container.replaceChildren();
-        this._stagedUsers.forEach((c, i) => {
+        this._stagedUsers.forEach((c) => {
             const chip = document.createElement('div');
             chip.className = 'smd-chip';
 
             const avatar = document.createElement('div');
-            avatar.className = `smd-chip-avatar smd-avatar--${i % 5}`;
+            avatar.className = `smd-chip-avatar uv-color-${_colorIndex(c.id)}`;
             const displayName = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.full_name || c.id.slice(0, 8);
             avatar.textContent = _initials(displayName);
 
@@ -516,15 +515,15 @@ const shareModal = {
 
     /**
      * @param {MemberEntry} entry
-     * @param {number}      idx
+     * @param {number}      _idx  (unused — color is now derived deterministically from userId)
      * @returns {HTMLElement}
      */
-    _buildMemberRow(entry, idx) {
+    _buildMemberRow(entry, _idx) {
         const row = document.createElement('div');
         row.className = 'smd-member-row';
 
         const avatar = document.createElement('div');
-        avatar.className = `smd-member-avatar smd-avatar--${idx % 5}`;
+        avatar.className = `smd-member-avatar uv-color-${_colorIndex(entry.grant.subject.id)}`;
 
         // Resolve display name async
         systemUsers.getDisplayName(entry.grant.subject.id).then((name) => {

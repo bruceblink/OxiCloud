@@ -270,7 +270,8 @@
             "archive": "أرشيف",
             "installer": "مثبّت",
             "code": "كود"
-        }
+        },
+        "owner": "المالك"
     },
     "dialogs": {
         "rename_folder": "إعادة تسمية المجلد",

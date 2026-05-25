@@ -103,6 +103,7 @@
  * @property {String} icon_special_class
  * @property {String} category
  * @property {String} size_formatted
+ * @property {string|null} owner_id UUID of the file/folder's actual owner
  */
 
 /**

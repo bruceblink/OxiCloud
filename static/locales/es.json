@@ -270,7 +270,8 @@
             "archive": "Archivo comprimido",
             "installer": "Instalador",
             "code": "Código"
-        }
+        },
+        "owner": "Propietario"
     },
     "dialogs": {
         "rename_folder": "Renombrar carpeta",

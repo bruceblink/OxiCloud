@@ -270,7 +270,8 @@
             "archive": "壓縮檔案",
             "installer": "安裝程式",
             "code": "程式碼"
-        }
+        },
+        "owner": "擁有者"
     },
     "dialogs": {
         "rename_folder": "重新命名資料夾",

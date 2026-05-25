@@ -270,7 +270,8 @@
             "archive": "아카이브",
             "installer": "설치 프로그램",
             "code": "코드"
-        }
+        },
+        "owner": "소유자"
     },
     "dialogs": {
         "rename_folder": "폴더 이름 변경",
