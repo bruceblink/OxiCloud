@@ -366,8 +366,9 @@
 /**
  * One collaborator row in the share modal's People section.
  * @typedef {Object} MemberEntry
- * @property {Grant}         grant  - The underlying grant (id, subject, resource, etc.)
- * @property {ShareRoleEnum} role   - Derived role label shown in the UI.
+ * @property {Grant}         grant   - Representative grant (used for subject/resource info).
+ * @property {Grant[]}       _grants - All grants for this subject on the resource (may be > 1).
+ * @property {ShareRoleEnum} role    - Derived role label shown in the UI.
  * @property {'keep'|'remove'|'change'|'new'} _op - Pending local operation.
  */
 

@@ -93,7 +93,7 @@ const sharedWithMeView = {
             if (data.items.length === 0 && !this._nextCursor) {
                 // First page came back empty
                 ui.showError(`
-                    <i class="fas fa-inbox empty-state-icon"></i>
+                    <i class="fas fa-share-alt empty-state-icon"></i>
                     <p>${i18n.t('sharedwithme_emptyStateTitle', 'Nothing shared with you yet')}</p>
                     <p>${i18n.t('sharedwithme_emptyStateDesc', 'Items shared with you by other users will appear here')}</p>
                 `);

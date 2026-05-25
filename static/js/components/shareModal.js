@@ -66,7 +66,8 @@ function _buildMembers(grantList) {
     const members = [];
     for (const subjectGrants of bySubject.values()) {
         members.push({
-            grant: subjectGrants[0], // representative grant (used for subject info)
+            grant: subjectGrants[0], // representative grant (used for subject/resource info)
+            _grants: subjectGrants, // all grants — needed to revoke every permission on remove
             role: _roleFromGrants(subjectGrants),
             _op: 'keep'
         });
@@ -442,15 +443,18 @@ const shareModal = {
 
     _commitStagedUsers() {
         for (const contact of this._stagedUsers) {
+            /** @type {Grant} */
+            const placeholderGrant = {
+                id: '', // not yet persisted
+                granted_at: 0,
+                granted_by: '',
+                subject: { type: 'user', id: contact.id },
+                permission: /** @type {import('../core/types.js').PermissionTypeEnum} */ (ROLE_PERMISSIONS[this._stagedRole][0]),
+                resource: { type: this._itemType, id: this._item?.id ?? '' }
+            };
             this._localMembers.push({
-                grant: {
-                    id: '', // not yet persisted
-                    granted_at: 0, // placeholder — grant hasn't been persisted yet
-                    granted_by: '',
-                    subject: { type: 'user', id: contact.id },
-                    permission: /** @type {import('../core/types.js').PermissionTypeEnum} */ (ROLE_PERMISSIONS[this._stagedRole][0]),
-                    resource: { type: this._itemType, id: this._item?.id ?? '' }
-                },
+                grant: placeholderGrant,
+                _grants: [], // no server grants yet — nothing to revoke on remove
                 role: this._stagedRole,
                 _op: 'new'
             });
@@ -480,7 +484,7 @@ const shareModal = {
      */
     _renderMemberGroupsInto(container) {
         container.replaceChildren();
-        const groups = /** @type {ShareRoleEnum[]} */ (['admin', 'editor', 'viewer']);
+        const groups = /** @type {ShareRoleEnum[]} */ (['viewer', 'editor', 'admin']);
         let memberIndex = 0;
 
         for (const role of groups) {
@@ -946,8 +950,11 @@ const shareModal = {
         try {
             // ── Grants ─────────────────────────────────────────────────────────
             for (const m of this._localMembers) {
-                if (m._op === 'remove' && m.grant.id) {
-                    await grants.revokeGrant(m.grant.id);
+                if (m._op === 'remove') {
+                    // Revoke every individual grant for this subject (one per permission).
+                    for (const g of m._grants) {
+                        if (g.id) await grants.revokeGrant(g.id);
+                    }
                 } else if (m._op === 'change' && m.grant.id) {
                     await grants.updateRole({
                         subject: { type: m.grant.subject.type, id: m.grant.subject.id },
