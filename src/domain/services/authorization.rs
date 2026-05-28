@@ -200,6 +200,14 @@ pub struct Grant {
     pub permission: Permission,
     pub granted_by: Uuid,
     pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Grant {
+    pub fn is_expired(&self) -> bool {
+        self.expires_at
+            .is_some_and(|exp| exp < chrono::Utc::now())
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

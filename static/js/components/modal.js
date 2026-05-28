@@ -346,14 +346,15 @@ const Modal = {
      *
      * @param {Object} options
      * @param {string}        options.title
-     * @param {string}        [options.icon]          - Font Awesome class, default 'fa-share-alt'
-     * @param {HTMLElement}   options.content         - DOM node to inject into .modal-body
-     * @param {string}        [options.confirmText]   - Confirm button label
-     * @param {string}        [options.cancelText]    - Cancel button label
-     * @param {() => void}    [options.onConfirm]     - Called when Confirm is clicked
-     * @param {() => void}    [options.onCancel]      - Called when Cancel / close is triggered
+     * @param {string}        [options.icon]             - Font Awesome class, default 'fa-share-alt'
+     * @param {HTMLElement}   options.content            - DOM node to inject into .modal-body
+     * @param {string}        [options.confirmText]      - Confirm button label
+     * @param {string}        [options.cancelText]       - Cancel button label
+     * @param {boolean}       [options.confirmDisabled]  - Initial disabled state of the confirm button
+     * @param {() => void}    [options.onConfirm]        - Called when Confirm is clicked
+     * @param {() => void}    [options.onCancel]         - Called when Cancel / close is triggered
      */
-    openPanel({ title, icon = 'fa-share-alt', content, confirmText = null, cancelText = null, onConfirm = null, onCancel = null }) {
+    openPanel({ title, icon = 'fa-share-alt', content, confirmText = null, cancelText = null, confirmDisabled = false, onConfirm = null, onCancel = null }) {
         if (!this.overlay) return;
 
         this._panelMode = true;
@@ -379,7 +380,7 @@ const Modal = {
         // ── Footer buttons ──────────────────────────────────────────────────
         if (this.confirmBtn) {
             this.confirmBtn.textContent = confirmText ?? i18n.t('actions.apply', 'Apply');
-            this.confirmBtn.disabled = false;
+            this.confirmBtn.disabled = confirmDisabled;
         }
         if (this.cancelBtn) {
             this.cancelBtn.textContent = cancelText ?? i18n.t('actions.cancel');

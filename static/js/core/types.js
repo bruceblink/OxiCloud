@@ -284,11 +284,12 @@
 /**
  * @typedef {Object} Grant
  * @property {string} id
- * @property {number} granted_at
+ * @property {string} granted_at  - ISO-8601 datetime string.
  * @property {string} granted_by
  * @property {Subject} subject
  * @property {PermissionTypeEnum} permission
  * @property {Resource} resource
+ * @property {string|null} [expires_at]  - ISO-8601 datetime string, or absent/null for no expiry.
  */
 
 /**
@@ -405,6 +406,7 @@
  * @property {Grant[]}       _grants - All grants for this subject on the resource (may be > 1).
  * @property {ShareRoleEnum} role    - Derived role label shown in the UI.
  * @property {'keep'|'remove'|'change'|'new'} _op - Pending local operation.
+ * @property {string|null}  [expires_at]  - YYYY-MM-DD expiry date string, or null for no expiry.
  */
 
 /**

@@ -86,6 +86,7 @@ pub async fn create_grant(
 
     let subject: Subject = dto.subject.into();
     let resource: Resource = dto.resource.into();
+    let expires_at = dto.expires_at;
 
     // Caller must have Share on the resource (owners pass via short-circuit).
     if let Err(e) = authz
@@ -97,7 +98,7 @@ pub async fn create_grant(
 
     let mut results: Vec<GrantDto> = Vec::with_capacity(permissions.len());
     for perm in permissions {
-        match authz.grant(caller_id, subject, perm, resource).await {
+        match authz.grant(caller_id, subject, perm, resource, expires_at).await {
             Ok(grant) => results.push(grant.into()),
             Err(err) => {
                 error!("grant insert failed for {perm:?}: {err}");
@@ -189,6 +190,7 @@ pub async fn set_role(
     let caller_id = auth_user.id;
     let subject: Subject = dto.subject.into();
     let resource: Resource = dto.resource.into();
+    let expires_at = dto.expires_at;
     let target_perms: std::collections::HashSet<Permission> =
         dto.role.expand().iter().copied().collect();
 
@@ -225,9 +227,17 @@ pub async fn set_role(
         }
     }
     for perm in &to_add {
-        if let Err(e) = authz.grant(caller_id, subject, *perm, resource).await {
+        if let Err(e) = authz.grant(caller_id, subject, *perm, resource, expires_at).await {
             return AppError::from(e).into_response();
         }
+    }
+
+    // Sync expiry on all remaining grants for this (subject, resource) pair —
+    // includes newly added ones and any that were already present (retained).
+    // Callers that omit expires_at will clear any existing expiry; this is
+    // intentional: it keeps all permission rows for the pair consistent.
+    if let Err(e) = authz.set_expiry_on_resource(subject, resource, expires_at).await {
+        return AppError::from(e).into_response();
     }
 
     // Return the new full set.

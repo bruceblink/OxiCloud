@@ -191,6 +191,9 @@ pub struct CreateGrantDto {
     pub permissions: Option<Vec<PermissionDto>>,
     #[serde(default)]
     pub role: Option<Role>,
+    /// Optional expiry for every grant in this request. RFC 3339 / ISO 8601.
+    #[serde(default)]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// `PUT /api/grants/role` — reconcile a subject's role on a resource.
@@ -199,6 +202,9 @@ pub struct UpdateRoleDto {
     pub subject: SubjectDto,
     pub resource: ResourceDto,
     pub role: Role,
+    /// Optional expiry applied to every grant written or updated by this call.
+    #[serde(default)]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -213,6 +219,8 @@ pub struct GrantDto {
     pub permission: PermissionDto,
     pub granted_by: Uuid,
     pub granted_at: chrono::DateTime<chrono::Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<Grant> for GrantDto {
@@ -224,6 +232,7 @@ impl From<Grant> for GrantDto {
             permission: g.permission.into(),
             granted_by: g.granted_by,
             granted_at: g.granted_at,
+            expires_at: g.expires_at,
         }
     }
 }

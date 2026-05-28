@@ -98,14 +98,34 @@ pub trait AuthorizationEngine: Send + Sync + 'static {
     async fn list_outgoing_grants(&self, granted_by: Uuid) -> Result<Vec<Grant>, DomainError>;
 
     /// Create a grant. Idempotent — duplicates are absorbed by the UNIQUE
-    /// constraint and the existing row is returned.
+    /// constraint; if the row already exists its `expires_at` is updated.
     async fn grant(
         &self,
         granted_by: Uuid,
         subject: Subject,
         permission: Permission,
         resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Grant, DomainError>;
+
+    /// Update `expires_at` on every grant row for the given subject.
+    /// Used when a share's expiry is changed — one call updates all
+    /// permission rows for that token in a single UPDATE.
+    async fn set_expiry_for_subject(
+        &self,
+        subject: Subject,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError>;
+
+    /// Update `expires_at` on every grant row for the given `(subject, resource)`
+    /// pair. Used by `set_role` to sync the expiry of retained grants when the
+    /// caller changes expiry without changing permissions.
+    async fn set_expiry_on_resource(
+        &self,
+        subject: Subject,
+        resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError>;
 
     /// Revoke a specific grant by its UUID. Returns `Ok(())` whether or not
     /// the row existed (idempotent revoke).

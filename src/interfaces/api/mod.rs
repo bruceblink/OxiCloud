@@ -34,9 +34,7 @@ use crate::application::dtos::search_dto::{
     SearchCriteriaDto, SearchFileResultDto, SearchFolderResultDto, SearchResultsDto,
     SearchSuggestionItem, SearchSuggestionsDto,
 };
-use crate::application::dtos::share_dto::{
-    CreateShareDto, ShareDto, SharePermissionsDto, UpdateShareDto,
-};
+use crate::application::dtos::share_dto::{CreateShareDto, ShareDto, UpdateShareDto};
 use crate::application::dtos::trash_dto::{
     DeletePermanentlyRequest, MoveToTrashRequest, RestoreFromTrashRequest, TrashedItemDto,
 };
@@ -257,7 +255,6 @@ use crate::interfaces::api::handlers::file_handler::MoveFilePayload;
             OidcExchangeDto,
             // Share schemas
             ShareDto,
-            SharePermissionsDto,
             CreateShareDto,
             UpdateShareDto,
             // Trash schemas

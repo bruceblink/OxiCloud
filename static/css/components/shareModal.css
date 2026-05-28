@@ -328,6 +328,8 @@
 }
 
 .smd-link-name {
+    flex: 1;
+    min-width: 0;
     font-size: 14px;
     color: var(--color-text-heading);
     overflow: hidden;
@@ -431,32 +433,6 @@
     color: var(--color-accent);
 }
 
-.smd-new-link-form {
-    margin-top: 8px;
-    padding: 14px;
-    background: var(--color-bg-hover);
-    border: 0.5px solid var(--color-border);
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.smd-new-link-form label {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    display: block;
-    margin-bottom: 3px;
-}
-
-.smd-new-link-form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
-}
-
 /* ── Password toggle row ─────────────────────────────────────────────────────── */
 
 .smd-pw-toggle {
@@ -487,4 +463,90 @@
     to {
         transform: rotate(360deg);
     }
+}
+
+/* ── Expiry chip toggle ──────────────────────────────────────────────────────── */
+
+/*
+ * The wrapper reserves a fixed width equal to the date input so that toggling
+ * between chip and input never shifts the surrounding flex row.
+ */
+.smd-expiry-chip-wrap {
+    display: inline-flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    width: 130px;
+}
+
+.smd-expiry-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px dashed var(--color-border-medium);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+        border-color 0.15s,
+        color 0.15s,
+        background 0.15s;
+}
+
+.smd-expiry-chip:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+    background: var(--color-bg-hover);
+}
+
+.smd-expiry-chip--set {
+    border-style: solid;
+    border-color: var(--color-border);
+    background: var(--color-bg-muted);
+    color: var(--color-text-secondary);
+}
+
+.smd-expiry-chip--set:hover {
+    border-color: var(--color-border-medium);
+    color: var(--color-text-heading);
+    background: var(--color-bg-hover);
+}
+
+.smd-expiry-chip-clear {
+    font-size: 13px;
+    line-height: 1;
+    color: var(--color-text-faint);
+    margin-left: auto;
+    padding: 0;
+    transition: color 0.1s;
+}
+
+.smd-expiry-chip-clear:hover {
+    color: var(--color-error-text);
+}
+
+.smd-expiry-date-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: 6px;
+    background: var(--color-bg-surface);
+    color: var(--color-text-heading);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--color-accent-ring);
+}
+
+/* In the search row the chip/input must match the height of the role select and
+   Add button (both use padding: 9px, font-size: 13px). */
+.smd-search-row .smd-expiry-chip,
+.smd-search-row .smd-expiry-date-input {
+    padding: 9px 10px;
+    font-size: 13px;
 }

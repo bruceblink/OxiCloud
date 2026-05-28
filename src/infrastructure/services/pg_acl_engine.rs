@@ -103,6 +103,7 @@ impl PgAclEngine {
                AND g.subject_id    = $2
                AND g.permission    = $3
                AND g.resource_type = 'folder'
+               AND (g.expires_at IS NULL OR g.expires_at > NOW())
                AND gf.lpath @> (SELECT lpath FROM storage.folders WHERE id = $4)
              LIMIT 1
             "#,
@@ -135,6 +136,7 @@ impl PgAclEngine {
                   FROM storage.access_grants
                  WHERE subject_type = $1 AND subject_id = $2 AND permission = $3
                    AND resource_type = 'file' AND resource_id = $4
+                   AND (expires_at IS NULL OR expires_at > NOW())
                 UNION ALL
                 -- cascading from any ancestor folder of the file's containing folder
                 SELECT 1
@@ -145,6 +147,7 @@ impl PgAclEngine {
                    AND g.subject_id    = $2
                    AND g.permission    = $3
                    AND g.resource_type = 'folder'
+                   AND (g.expires_at IS NULL OR g.expires_at > NOW())
                    AND target_f.folder_id IS NOT NULL
                    AND gf.lpath @> (SELECT lpath FROM storage.folders
                                      WHERE id = target_f.folder_id)
@@ -186,8 +189,9 @@ impl PgAclEngine {
         Ok(Some((res, granter)))
     }
 
-    /// Decode a (id, subject_type, subject_id, resource_type, resource_id,
-    /// permission, granted_by, granted_at) row into a `Grant`.
+    /// Row type for all full-grant SELECT queries:
+    /// (id, subject_type, subject_id, resource_type, resource_id, permission, granted_by, granted_at, expires_at)
+    #[allow(clippy::type_complexity)]
     fn row_to_grant(
         row: (
             Uuid,
@@ -198,6 +202,7 @@ impl PgAclEngine {
             String,
             Uuid,
             chrono::DateTime<chrono::Utc>,
+            Option<chrono::DateTime<chrono::Utc>>,
         ),
     ) -> Result<Grant, DomainError> {
         let subject = Subject::from_parts(&row.1, row.2)
@@ -213,6 +218,7 @@ impl PgAclEngine {
             permission,
             granted_by: row.6,
             granted_at: row.7,
+            expires_at: row.8,
         })
     }
 }
@@ -271,11 +277,12 @@ impl AuthorizationEngine for PgAclEngine {
                 String,
                 Uuid,
                 chrono::DateTime<chrono::Utc>,
+                Option<chrono::DateTime<chrono::Utc>>,
             ),
         >(
             r#"
             SELECT id, subject_type, subject_id, resource_type, resource_id,
-                   permission, granted_by, granted_at
+                   permission, granted_by, granted_at, expires_at
               FROM storage.access_grants
              WHERE subject_type = $1
                AND subject_id   = $2
@@ -636,11 +643,12 @@ impl AuthorizationEngine for PgAclEngine {
                 String,
                 Uuid,
                 chrono::DateTime<chrono::Utc>,
+                Option<chrono::DateTime<chrono::Utc>>,
             ),
         >(
             r#"
             SELECT id, subject_type, subject_id, resource_type, resource_id,
-                   permission, granted_by, granted_at
+                   permission, granted_by, granted_at, expires_at
               FROM storage.access_grants
              WHERE resource_type = $1
                AND resource_id   = $2
@@ -668,11 +676,12 @@ impl AuthorizationEngine for PgAclEngine {
                 String,
                 Uuid,
                 chrono::DateTime<chrono::Utc>,
+                Option<chrono::DateTime<chrono::Utc>>,
             ),
         >(
             r#"
             SELECT id, subject_type, subject_id, resource_type, resource_id,
-                   permission, granted_by, granted_at
+                   permission, granted_by, granted_at, expires_at
               FROM storage.access_grants
              WHERE granted_by = $1
              ORDER BY granted_at DESC
@@ -692,10 +701,8 @@ impl AuthorizationEngine for PgAclEngine {
         subject: Subject,
         permission: Permission,
         resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Grant, DomainError> {
-        // Idempotent: ON CONFLICT DO UPDATE so we always return the row
-        // (whether newly inserted or pre-existing). The "update" is a no-op
-        // (granted_by/granted_at preserved from the existing row).
         let row = sqlx::query_as::<
             _,
             (
@@ -707,16 +714,17 @@ impl AuthorizationEngine for PgAclEngine {
                 String,
                 Uuid,
                 chrono::DateTime<chrono::Utc>,
+                Option<chrono::DateTime<chrono::Utc>>,
             ),
         >(
             r#"
             INSERT INTO storage.access_grants
-                (subject_type, subject_id, resource_type, resource_id, permission, granted_by)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (subject_type, subject_id, resource_type, resource_id, permission, granted_by, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (subject_type, subject_id, resource_type, resource_id, permission)
-            DO UPDATE SET subject_type = EXCLUDED.subject_type
+            DO UPDATE SET expires_at = EXCLUDED.expires_at
             RETURNING id, subject_type, subject_id, resource_type, resource_id,
-                      permission, granted_by, granted_at
+                      permission, granted_by, granted_at, expires_at
             "#,
         )
         .bind(subject.type_str())
@@ -725,11 +733,51 @@ impl AuthorizationEngine for PgAclEngine {
         .bind(resource.id())
         .bind(permission.as_str())
         .bind(granted_by)
+        .bind(expires_at)
         .fetch_one(self.pool.as_ref())
         .await
         .map_err(|e| DomainError::internal_error("PgAcl", format!("insert grant: {e}")))?;
 
         Self::row_to_grant(row)
+    }
+
+    async fn set_expiry_for_subject(
+        &self,
+        subject: Subject,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE storage.access_grants SET expires_at = $3 WHERE subject_type = $1 AND subject_id = $2",
+        )
+        .bind(subject.type_str())
+        .bind(subject.id())
+        .bind(expires_at)
+        .execute(self.pool.as_ref())
+        .await
+        .map_err(|e| DomainError::internal_error("PgAcl", format!("set_expiry_for_subject: {e}")))?;
+        Ok(())
+    }
+
+    async fn set_expiry_on_resource(
+        &self,
+        subject: Subject,
+        resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE storage.access_grants SET expires_at = $3 \
+             WHERE subject_type = $1 AND subject_id = $2 \
+             AND resource_type = $4 AND resource_id = $5",
+        )
+        .bind(subject.type_str())
+        .bind(subject.id())
+        .bind(expires_at)
+        .bind(resource.type_str())
+        .bind(resource.id())
+        .execute(self.pool.as_ref())
+        .await
+        .map_err(|e| DomainError::internal_error("PgAcl", format!("set_expiry_on_resource: {e}")))?;
+        Ok(())
     }
 
     async fn revoke(&self, grant_id: Uuid) -> Result<(), DomainError> {
