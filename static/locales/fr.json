@@ -723,7 +723,9 @@
         "accessedAt": "Date d'accès",
         "modifiedAt": "Date de modification",
         "createdAt": "Date de création",
-        "size": "Taille"
+        "size": "Taille",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "Aujourd'hui",

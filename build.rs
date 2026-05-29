@@ -27,18 +27,6 @@ const HTML_INCLUDE: &[&str] = &[
     "share.html",
 ];
 
-// ─── View CSS files linked directly in index.html (not via @import) ──────────
-const INDEX_VIEW_CSS: &[&str] = &[
-    "views/inlineViewer.css",
-    "views/favorites.css",
-    "views/recent.css",
-    "views/shared.css",
-    "views/trash.css",
-    "views/photos.css",
-    "views/photosLightbox.css",
-    "views/music.css",
-];
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Entry point
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -91,18 +79,28 @@ fn process_release(manifest_dir: &Path, static_dir: &Path, out_dir: &Path) {
 
     let css_dir = static_dir.join("css");
 
+    // Read index.html once — used for both CSS and JS extraction.
+    let index_html = fs::read_to_string(static_dir.join("index.html")).expect("read index.html");
+
     // ── 2. Resolve main.css @imports ─────────────────────────────────────────
     let resolved_main = resolve_css_imports(&css_dir.join("main.css"), &css_dir);
     let minified_main = css_minify_safe(&resolved_main);
     fs::write(dist_dir.join("css/main.css"), &minified_main).expect("write main.css");
 
     // ── 3. Build CSS bundle for index.html ───────────────────────────────────
+    // Derive the list of view CSS files directly from the <link> tags in index.html
+    // so build.rs never needs to be updated when a new stylesheet is added.
     let mut css_all = resolved_main;
-    for view in INDEX_VIEW_CSS {
-        let p = css_dir.join(view);
+    for view in extract_css_links(&index_html) {
+        let p = css_dir.join(&view);
         if p.exists() {
             css_all.push_str(&fs::read_to_string(&p).unwrap_or_default());
             css_all.push('\n');
+        } else {
+            eprintln!(
+                "cargo:warning=CSS link in index.html not found: {}",
+                p.display()
+            );
         }
     }
     let css_bundle = css_minify_safe(&css_all);
@@ -116,7 +114,6 @@ fn process_release(manifest_dir: &Path, static_dir: &Path, out_dir: &Path) {
     // ── 5. Bundle all ES modules into one IIFE ───────────────────────────────
     // Walk the import graph starting from every <script type="module"> in index.html,
     // strip import/export syntax, wrap in an IIFE, then minify as a classic script.
-    let index_html = fs::read_to_string(static_dir.join("index.html")).expect("read index.html");
     let module_scripts = extract_module_scripts(&index_html);
     let js_raw = build_js_module_bundle(&module_scripts, static_dir);
     // Validate the raw bundle with OXC before minifying — catches re-declaration
@@ -253,6 +250,29 @@ fn minify_tree_css(dir: &Path) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // JS bundling (ES module → single IIFE)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/// Collect `<link rel="stylesheet" href="/css/…">` paths from HTML as paths
+/// relative to the CSS directory (e.g. `views/mySharesView.css`).
+/// Skips `main.css` (resolved separately via @import chain).
+fn extract_css_links(html: &str) -> Vec<String> {
+    html.lines()
+        .filter_map(|l| {
+            let t = l.trim();
+            if t.starts_with("<link") && t.contains("stylesheet") && t.contains("href=\"/css/") {
+                let s = t.find("href=\"/css/")? + 11; // skip `href="/css/`
+                let e = t[s..].find('"')? + s;
+                let rel = t[s..e].to_string();
+                if rel == "main.css" || rel.starts_with("app.") {
+                    None
+                } else {
+                    Some(rel)
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 
 /// Collect `<script type="module" src="…">` paths from HTML.
 fn extract_module_scripts(html: &str) -> Vec<String> {
@@ -953,7 +973,6 @@ fn minify_tree_js(dir: &Path) {
                 continue;
             }
             if let Ok(src) = fs::read_to_string(&p) {
-                println!("cargo:warning=minify-js: {}", p.display());
                 let _ = fs::write(&p, js_minify_safe(&src));
             }
         }

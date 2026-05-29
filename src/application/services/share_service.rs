@@ -28,7 +28,7 @@ use crate::{
         config::AppConfig,
         errors::{DomainError, ErrorKind},
     },
-    domain::entities::share::{Share, ShareItemType, SharePermissions},
+    domain::entities::share::{Share, ShareItemType},
 };
 
 #[derive(Debug, Error)]
@@ -229,87 +229,59 @@ impl ShareUseCase for ShareService {
         user_id: Uuid,
         dto: CreateShareDto,
     ) -> Result<ShareDto, DomainError> {
-        // Convert the item type
         let item_type = ShareItemType::try_from(dto.item_type.as_str())
             .map_err(|e| ShareServiceError::InvalidItemType(e.to_string()))?;
 
-        // Verify that the item exists
         self.verify_item_exists(&dto.item_id, &item_type).await?;
 
-        // Convert the permissions DTO if it exists
-        let permissions = dto.permissions.map(|p| p.to_entity());
-
-        // Hash the password if provided (async, semaphore-bounded)
         let password_hash = match dto.password {
             Some(p) => Some(self.hash_password_async(&p).await?),
             None => None,
         };
 
-        // Create the Share entity
         let share = Share::new(
             dto.item_id.clone(),
             dto.item_name.clone(),
             item_type,
             user_id,
-            permissions,
             password_hash,
-            dto.expires_at,
         )
         .map_err(|e| ShareServiceError::Validation(e.to_string()))?;
 
-        // Save to the repository
         let saved_share = self
             .share_repository
             .save_share(&share)
             .await
             .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
 
-        // Mirror the share permissions as ReBAC token grants so that
-        // `GET /api/grants/outgoing` picks them up and the UI can show the
-        // share badge without a separate `/api/shares` round-trip.
-        // The DELETE trigger `trg_cleanup_grants_token` handles cleanup when
-        // the share is later removed — no extra service-layer code needed there.
-        {
-            let share_id = saved_share.id();
-            let item_id_uuid = Uuid::parse_str(saved_share.item_id())
-                .map_err(|_| ShareServiceError::Validation("Invalid item UUID".to_string()))?;
+        // Create one Read-only grant for the token subject, carrying expires_at.
+        // Tokens are always read-only. The DELETE trigger `trg_cleanup_grants_token`
+        // cleans up this grant when the share is later deleted.
+        let item_id_uuid = Uuid::parse_str(saved_share.item_id())
+            .map_err(|_| ShareServiceError::Validation("Invalid item UUID".to_string()))?;
+        let resource = match saved_share.item_type() {
+            ShareItemType::File => Resource::File(item_id_uuid),
+            ShareItemType::Folder => Resource::Folder(item_id_uuid),
+        };
+        let expires_dt = dto
+            .expires_at
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts as i64, 0));
+        self.authorization
+            .grant(
+                user_id,
+                Subject::Token(saved_share.id()),
+                Permission::Read,
+                resource,
+                expires_dt,
+            )
+            .await
+            .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
 
-            let resource = match saved_share.item_type() {
-                ShareItemType::File => Resource::File(item_id_uuid),
-                ShareItemType::Folder => Resource::Folder(item_id_uuid),
-            };
-            let subject = Subject::Token(share_id);
-            let perms = saved_share.permissions();
-
-            // Read is always granted
-            self.authorization
-                .grant(user_id, subject, Permission::Read, resource)
-                .await
-                .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
-
-            // Write permission → Create + Update
-            if perms.write() {
-                self.authorization
-                    .grant(user_id, subject, Permission::Create, resource)
-                    .await
-                    .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
-                self.authorization
-                    .grant(user_id, subject, Permission::Update, resource)
-                    .await
-                    .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
-            }
-
-            // Reshare permission → Share
-            if perms.reshare() {
-                self.authorization
-                    .grant(user_id, subject, Permission::Share, resource)
-                    .await
-                    .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
-            }
-        }
-
-        // Convert the entity to DTO for the response
-        Ok(ShareDto::from_entity(&saved_share, &self.config.base_url()))
+        // Return DTO with the requested expires_at (grant subquery on the share
+        // row would return NULL at this point since INSERT ran before the grant).
+        let mut response = ShareDto::from_entity(&saved_share, &self.config.base_url());
+        response.expires_at = dto.expires_at;
+        Ok(response)
     }
 
     async fn get_shared_link(&self, id: Uuid, requester_id: Uuid) -> Result<ShareDto, DomainError> {
@@ -364,16 +336,6 @@ impl ShareUseCase for ShareService {
         // SECURITY: ownership-verified lookup — prevents IDOR
         let mut share = self.fetch_owned_share(id, requester_id).await?;
 
-        // Update permissions if provided
-        if let Some(permissions_dto) = dto.permissions {
-            let permissions = SharePermissions::new(
-                permissions_dto.read,
-                permissions_dto.write,
-                permissions_dto.reshare,
-            );
-            share = share.with_permissions(permissions);
-        }
-
         // Update password if provided (async, semaphore-bounded)
         if let Some(password) = dto.password {
             let password_hash = if password.is_empty() {
@@ -384,23 +346,33 @@ impl ShareUseCase for ShareService {
             share = share.with_password(password_hash);
         }
 
-        // Update expiration date if provided
+        // Expiry is managed at the grant level; update all grants for this token.
+        let new_expires_at = if dto.expires_at.is_some() {
+            dto.expires_at
+                .and_then(|ts| chrono::DateTime::from_timestamp(ts as i64, 0))
+        } else {
+            None
+        };
         if dto.expires_at.is_some() {
-            share = share.with_expiration(dto.expires_at);
+            self.authorization
+                .set_expiry_for_subject(Subject::Token(share.id()), new_expires_at)
+                .await
+                .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
         }
 
-        // Save the changes
         let updated_share = self
             .share_repository
             .update_share(&share)
             .await
             .map_err(|e| ShareServiceError::Repository(e.to_string()))?;
 
-        // Convert the entity to DTO for the response
-        Ok(ShareDto::from_entity(
-            &updated_share,
-            &self.config.base_url(),
-        ))
+        // Use the requested expires_at for the response (subquery in update_share
+        // runs before set_expiry_for_subject committed, so entity may lag).
+        let mut response = ShareDto::from_entity(&updated_share, &self.config.base_url());
+        if dto.expires_at.is_some() {
+            response.expires_at = dto.expires_at;
+        }
+        Ok(response)
     }
 
     async fn delete_shared_link(&self, id: Uuid, requester_id: Uuid) -> Result<(), DomainError> {
@@ -510,8 +482,6 @@ impl ShareUseCase for ShareService {
 #[allow(dead_code)]
 mod tests {
     use super::*;
-    #[allow(unused_imports)]
-    use crate::application::dtos::share_dto::SharePermissionsDto;
     use crate::application::ports::auth_ports::PasswordHasherPort;
     use crate::application::ports::share_ports::ShareStoragePort;
     use crate::application::ports::storage_ports::FileReadPort;
@@ -606,7 +576,6 @@ mod tests {
             let item_type = ShareItemType::try_from(dto.item_type.as_str())
                 .map_err(|e| ShareServiceError::InvalidItemType(e.to_string()))?;
             self.verify_item_exists(&dto.item_id, &item_type).await?;
-            let permissions = dto.permissions.map(|p| p.to_entity());
             let password_hash = match dto.password {
                 Some(p) => Some(self.hash_password_async(&p).await?),
                 None => None,
@@ -616,9 +585,7 @@ mod tests {
                 dto.item_name.clone(),
                 item_type,
                 user_id,
-                permissions,
                 password_hash,
-                dto.expires_at,
             )
             .map_err(|e| ShareServiceError::Validation(e.to_string()))?;
             let saved_share = self
@@ -692,9 +659,6 @@ mod tests {
                 .map_err(|e| {
                     ShareServiceError::NotFound(format!("Share {} not found: {}", id, e))
                 })?;
-            if let Some(p) = dto.permissions {
-                share = share.with_permissions(SharePermissions::new(p.read, p.write, p.reshare));
-            }
             if let Some(password) = dto.password {
                 let hash = if password.is_empty() {
                     None
@@ -702,9 +666,6 @@ mod tests {
                     Some(self.hash_password_async(&password).await?)
                 };
                 share = share.with_password(hash);
-            }
-            if dto.expires_at.is_some() {
-                share = share.with_expiration(dto.expires_at);
             }
             let updated = self
                 .share_repository
@@ -1208,11 +1169,6 @@ mod tests {
             item_type: "file".to_string(),
             password: Some("secret".to_string()),
             expires_at: None,
-            permissions: Some(SharePermissionsDto {
-                read: true,
-                write: false,
-                reshare: false,
-            }),
         };
 
         let result = service.create_shared_link(Uuid::new_v4(), dto).await;

@@ -139,6 +139,36 @@ function normalizeDateBucket(value) {
 }
 
 /**
+ * Normalize a future expiry value into a human-readable bucket label.
+ * Buckets (soonest-first): Expired | Tomorrow | In less than 7 days | In less than 30 days | <YYYY> | No expiration
+ *
+ * Accepts the same input types as `normalizeDateBucket`.
+ *
+ * @param {string | number | Date | null | undefined} value
+ * @returns {string}
+ */
+function normalizeExpiryBucket(value) {
+    if (value === null || value === undefined) {
+        return i18n.t('expiryBucket.noExpiry', 'No expiration');
+    }
+    /** @type {Date} */
+    let date;
+    if (value instanceof Date) {
+        date = value;
+    } else if (typeof value === 'number') {
+        date = new Date(value < 1e12 ? value * 1000 : value);
+    } else {
+        date = new Date(value);
+    }
+    const daysUntil = Math.floor((date.getTime() - Date.now()) / 86_400_000);
+    if (daysUntil < 0) return i18n.t('expiryBucket.expired', 'Expired');
+    if (daysUntil <= 1) return i18n.t('expiryBucket.tomorrow', 'Tomorrow');
+    if (daysUntil <= 7) return i18n.t('expiryBucket.week', 'In less than 7 days');
+    if (daysUntil <= 30) return i18n.t('expiryBucket.month', 'In less than 30 days');
+    return String(date.getFullYear());
+}
+
+/**
  * Maps a file size in bytes to a coarse, human-readable bucket label.
  *
  * Pass `-1` for folders — they sort before all files on the server and
@@ -167,4 +197,15 @@ function sizeBucket(bytes) {
     return                                      i18n.t('sizeBucket.huge',    '> 5 GB');
 }
 
-export { escapeHtml, formatDateShort, formatDateTime, formatFileSize, formatQuotaSize, isEmailValid, isTextViewable, normalizeDateBucket, sizeBucket };
+export {
+    escapeHtml,
+    formatDateShort,
+    formatDateTime,
+    formatFileSize,
+    formatQuotaSize,
+    isEmailValid,
+    isTextViewable,
+    normalizeDateBucket,
+    normalizeExpiryBucket,
+    sizeBucket
+};

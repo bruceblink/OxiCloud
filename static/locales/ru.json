@@ -723,7 +723,9 @@
         "modifiedAt": "Дата изменения",
         "createdAt": "Дата создания",
         "size": "Размер",
-        "favoriteDate": "Дата добавления в избранное"
+        "favoriteDate": "Дата добавления в избранное",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "Сегодня",

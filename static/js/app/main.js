@@ -18,7 +18,6 @@ import { recent } from '../features/library/recent.js';
 import { fileSharing } from '../features/sharing/fileSharing.js';
 import { grants } from '../model/grants.js';
 import { recentView } from '../views/recent/recentView.js';
-import { sharedView } from '../views/shared/sharedView.js';
 import { checkAuthentication } from './authSession.js';
 import { loadFiles } from './filesView.js';
 import {
@@ -162,12 +161,30 @@ const ACTIONS_BAR_TEMPLATES = {
         <div class="action-buttons" id="default-buttons"></div>
         ${_batchToolbarButons}
         ${_toggleButtons}
+    `,
+    shared: `
+        <div class="action-buttons" id="default-buttons"></div>
+        <div class="view-toggle">
+            <div class="group-by-selector hidden" id="group-by-selector">
+                <button class="toggle-btn group-by-btn" id="group-by-btn"
+                        title="Group by" data-i18n-title="groupby.title">
+                    <i class="fas fa-layer-group"></i>
+                    <span class="group-by-label"></span>
+                </button>
+                <button class="toggle-btn sort-dir-btn" id="sort-dir-btn"
+                        title="Sort direction" data-i18n-title="sortdir.title">
+                    <i class="fas fa-arrow-up" id="sort-dir-icon"></i>
+                </button>
+                <div class="group-by-menu hidden" id="group-by-menu"></div>
+            </div>
+            <span class="view-toggle-separator hidden" id="group-by-separator"></span>
+        </div>
     `
 };
 
 /**
  *
- * @param {'files' | 'trash' | 'favorites' | 'recent' | 'sharedwithme' | 'hidden'} mode
+ * @param {'files' | 'trash' | 'favorites' | 'recent' | 'sharedwithme' | 'shared' | 'hidden'} mode
  * @param {boolean} [force=false]
  * @returns
  */
@@ -259,8 +276,12 @@ function syncGroupByMenu(defs = []) {
 
     // Rebuild menu options — call i18n.t() directly so each label is resolved
     // at call time (translations are loaded by the time any section switch runs).
-    menu.innerHTML = `<button class="group-by-option active" data-group-by="">${escapeHtml(i18n.t('groupby.none', 'None'))}</button>`;
+    // A def with key='' lets the section override the default "None" label.
+    const noneOverride = defs.find((d) => d.key === '');
+    const noneLabel = noneOverride ? noneOverride.label : i18n.t('groupby.none', 'None');
+    menu.innerHTML = `<button class="group-by-option active" data-group-by="">${escapeHtml(noneLabel)}</button>`;
     for (const def of defs) {
+        if (def.key === '') continue;
         menu.insertAdjacentHTML('beforeend', `<button class="group-by-option" data-group-by="${escapeHtml(def.key)}">${escapeHtml(def.label)}</button>`);
     }
 
@@ -508,6 +529,12 @@ function initApp() {
     window.addEventListener('authenticationDone', async () => {
         // Check if a context was provided in the URL
         const hashContext = deserializeHash();
+
+        // Always fetch grants so shared badges are correct regardless of the
+        // initial section. Fire in the background — don't block section init.
+        grants.fetchIncomingGrants();
+        grants.fetchOutgoingGrants();
+
         switchSectionTo(hashContext.section);
         if (hashContext.section === 'files') {
             if (hashContext.path) {
@@ -519,9 +546,6 @@ function initApp() {
                 app.viewFile = hashContext.file;
             }
 
-            // get grants (xxx: async methods)
-            await grants.fetchIncomingGrants();
-            await grants.fetchOutgoingGrants();
             loadFiles();
         }
     });
@@ -640,8 +664,10 @@ function setupEventListeners() {
         } else {
             // change is from history, data provided in event
             switchSectionTo(e.state.section);
-            app.currentPath = e.state.id;
-            loadFiles({ insertHistory: false });
+            if (e.state.section === 'files') {
+                app.currentPath = e.state.id;
+                loadFiles({ insertHistory: false });
+            }
         }
     });
 
@@ -676,11 +702,8 @@ function setupEventListeners() {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             const query = elements.searchInput?.value.trim();
 
-            // In shared section, filter locally
-            if (app.currentSection === 'shared' && sharedView) {
-                sharedView.filterAndSortItems();
-                return;
-            }
+            // My Shares section does not support in-page search
+            if (app.currentSection === 'shared') return;
 
             if (query) {
                 performSearch(query);

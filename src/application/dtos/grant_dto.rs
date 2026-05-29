@@ -191,6 +191,9 @@ pub struct CreateGrantDto {
     pub permissions: Option<Vec<PermissionDto>>,
     #[serde(default)]
     pub role: Option<Role>,
+    /// Optional expiry for every grant in this request. RFC 3339 / ISO 8601.
+    #[serde(default)]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// `PUT /api/grants/role` — reconcile a subject's role on a resource.
@@ -199,6 +202,9 @@ pub struct UpdateRoleDto {
     pub subject: SubjectDto,
     pub resource: ResourceDto,
     pub role: Role,
+    /// Optional expiry applied to every grant written or updated by this call.
+    #[serde(default)]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -213,6 +219,8 @@ pub struct GrantDto {
     pub permission: PermissionDto,
     pub granted_by: Uuid,
     pub granted_at: chrono::DateTime<chrono::Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<Grant> for GrantDto {
@@ -224,6 +232,7 @@ impl From<Grant> for GrantDto {
             permission: g.permission.into(),
             granted_by: g.granted_by,
             granted_at: g.granted_at,
+            expires_at: g.expires_at,
         }
     }
 }
@@ -303,5 +312,54 @@ pub struct SharedWithMeItemDto {
     pub resource: ResourceContentDto,
 }
 
+/// Derive the closest-matching role label from a set of permissions.
+/// Maps the permission set to `"admin"`, `"editor"`, or `"viewer"`.
+pub fn role_from_permissions(perms: &[Permission]) -> &'static str {
+    if perms.contains(&Permission::Delete) && perms.contains(&Permission::Share) {
+        "admin"
+    } else if perms.contains(&Permission::Create) || perms.contains(&Permission::Update) {
+        "editor"
+    } else {
+        "viewer"
+    }
+}
+
 /// Response for `GET /api/grants/incoming/resources`.
 pub type SharedWithMeDto = CursorListResponse<SharedWithMeItemDto>;
+
+// ════════════════════════════════════════════════════════════════════════════
+// My-Shares DTOs  (GET /api/grants/outgoing/resources)
+// ════════════════════════════════════════════════════════════════════════════
+
+/// One (subject, permissions) entry within an outgoing resource item.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OutgoingResourceGrantDto {
+    pub grant_id: Uuid,
+    /// `"user"` | `"token"`
+    pub subject_type: String,
+    pub subject_id: Uuid,
+    /// Human-readable label (username for users, share name for tokens).
+    pub subject_display: String,
+    /// Derived role label: `"viewer"` | `"editor"` | `"admin"`.
+    pub role: String,
+    pub granted_at: chrono::DateTime<chrono::Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Whether the token has a password set. Always `false` for user subjects.
+    pub has_password: bool,
+}
+
+/// One item in the my-shares list.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OutgoingResourceItemDto {
+    pub resource_type: ResourceTypeDto,
+    /// Earliest grant date across all subjects on this resource.
+    pub first_shared_at: chrono::DateTime<chrono::Utc>,
+    /// Full resource details. Shape is determined by `resource_type`.
+    pub resource: ResourceContentDto,
+    /// One entry per (subject, permissions) pair.
+    pub grants: Vec<OutgoingResourceGrantDto>,
+}
+
+/// Response for `GET /api/grants/outgoing/resources`.
+pub type MySharesDto = CursorListResponse<OutgoingResourceItemDto>;

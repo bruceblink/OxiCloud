@@ -882,7 +882,7 @@ const ui = {
             loadFiles();
             return;
         }
-        if (app.currentSection === 'sharedwithme') {
+        if (app.currentSection === 'sharedwithme' || app.currentSection === 'shared') {
             // Activate Files UI (nav, breadcrumb, actions bar) without
             // resetting the path — the shared folder becomes the entry point.
             activateFilesUI();

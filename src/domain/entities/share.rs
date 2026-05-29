@@ -12,18 +12,11 @@ pub struct Share {
     item_type: ShareItemType,
     token: String,
     password_hash: Option<String>,
+    /// Derived from `storage.access_grants.expires_at` — not stored on the share row.
     expires_at: Option<u64>,
-    permissions: SharePermissions,
     created_at: u64,
     created_by: Uuid,
     access_count: u64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SharePermissions {
-    read: bool,
-    write: bool,
-    reshare: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,29 +31,12 @@ impl Share {
         item_name: Option<String>,
         item_type: ShareItemType,
         created_by: Uuid,
-        permissions: Option<SharePermissions>,
         password_hash: Option<String>,
-        expires_at: Option<u64>,
     ) -> Result<Self, ShareError> {
-        // Validate item_id
         if item_id.is_empty() {
             return Err(ShareError::ValidationError(
                 "Item ID cannot be empty".to_string(),
             ));
-        }
-
-        // Validate expiration date if provided
-        if let Some(expires) = expires_at {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_secs();
-
-            if expires <= now {
-                return Err(ShareError::InvalidExpiration(
-                    "Expiration date must be in the future".to_string(),
-                ));
-            }
         }
 
         let now = SystemTime::now()
@@ -75,12 +51,7 @@ impl Share {
             item_type,
             token: Uuid::new_v4().to_string(),
             password_hash,
-            expires_at,
-            permissions: permissions.unwrap_or(SharePermissions {
-                read: true,
-                write: false,
-                reshare: false,
-            }),
+            expires_at: None,
             created_at: now,
             created_by,
             access_count: 0,
@@ -96,7 +67,6 @@ impl Share {
         token: String,
         password_hash: Option<String>,
         expires_at: Option<u64>,
-        permissions: SharePermissions,
         created_at: u64,
         created_by: Uuid,
         access_count: u64,
@@ -109,7 +79,6 @@ impl Share {
             token,
             password_hash,
             expires_at,
-            permissions,
             created_at,
             created_by,
             access_count,
@@ -142,10 +111,6 @@ impl Share {
         self.expires_at
     }
 
-    pub fn permissions(&self) -> &SharePermissions {
-        &self.permissions
-    }
-
     pub fn created_at(&self) -> u64 {
         self.created_at
     }
@@ -160,18 +125,8 @@ impl Share {
 
     // ── Builder-style modifiers (immutable) ──
 
-    pub fn with_permissions(mut self, permissions: SharePermissions) -> Self {
-        self.permissions = permissions;
-        self
-    }
-
     pub fn with_password(mut self, password_hash: Option<String>) -> Self {
         self.password_hash = password_hash;
-        self
-    }
-
-    pub fn with_expiration(mut self, expires_at: Option<u64>) -> Self {
-        self.expires_at = expires_at;
         self
     }
 
@@ -209,28 +164,6 @@ impl Share {
     /// to keep cryptographic dependencies out of the domain layer.
     pub fn password_hash(&self) -> Option<&str> {
         self.password_hash.as_deref()
-    }
-}
-
-impl SharePermissions {
-    pub fn new(read: bool, write: bool, reshare: bool) -> Self {
-        Self {
-            read,
-            write,
-            reshare,
-        }
-    }
-
-    pub fn read(&self) -> bool {
-        self.read
-    }
-
-    pub fn write(&self) -> bool {
-        self.write
-    }
-
-    pub fn reshare(&self) -> bool {
-        self.reshare
     }
 }
 
@@ -275,57 +208,15 @@ mod tests {
             ShareItemType::File,
             uid,
             None,
-            None,
-            None,
         )
         .unwrap();
 
         assert_eq!(share.item_id(), "test_file_id");
         assert_eq!(*share.item_type(), ShareItemType::File);
         assert_eq!(share.created_by(), uid);
-        assert!(share.permissions().read());
-        assert!(!share.permissions().write());
-        assert!(!share.permissions().reshare());
         assert!(!share.has_password());
         assert!(share.expires_at().is_none());
         assert_eq!(share.access_count(), 0);
-    }
-
-    #[test]
-    fn test_share_is_expired() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
-
-        // Create a share that expires in the future
-        let future = now + 3600; // 1 hour in the future
-        let share = Share::new(
-            "test_file_id".to_string(),
-            None,
-            ShareItemType::File,
-            test_user_id(),
-            None,
-            None,
-            Some(future),
-        )
-        .unwrap();
-
-        assert!(!share.is_expired());
-
-        // Test with past expiration (should fail during creation)
-        let past = now - 3600; // 1 hour in the past
-        let share_result = Share::new(
-            "test_file_id".to_string(),
-            None,
-            ShareItemType::File,
-            test_user_id(),
-            None,
-            None,
-            Some(past),
-        );
-
-        assert!(share_result.is_err());
     }
 
     #[test]
@@ -355,9 +246,7 @@ mod tests {
             None,
             ShareItemType::File,
             test_user_id(),
-            None,
             Some("some_hash_value".to_string()),
-            None,
         )
         .unwrap();
 
@@ -372,8 +261,6 @@ mod tests {
             None,
             ShareItemType::File,
             test_user_id(),
-            None,
-            None, // No password
             None,
         )
         .unwrap();

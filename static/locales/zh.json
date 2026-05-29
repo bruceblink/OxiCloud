@@ -723,7 +723,9 @@
         "modifiedAt": "修改日期",
         "createdAt": "创建日期",
         "size": "大小",
-        "favoriteDate": "收藏日期"
+        "favoriteDate": "收藏日期",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "今天",

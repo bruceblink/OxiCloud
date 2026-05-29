@@ -47,13 +47,6 @@
  */
 
 /**
- * @typedef {Object} SharePermissions
- * @property {boolean} read
- * @property {boolean} reshare
- * @property {boolean} write
- */
-
-/**
  * @typedef {Object} ShareItem
  * @property {number} access_count
  * @property {number} created_at - timestamp
@@ -64,7 +57,6 @@
  * @property {string} item_id
  * @property {string} item_name
  * @property {ItemTypeEnum} item_type
- * @property {SharePermissions} permissions
  * @property {string | null} token
  * @property {string} url
  */
@@ -76,14 +68,12 @@
  * @property {ItemTypeEnum} item_type
  * @property {string|null} password
  * @property {number|null} expires_at - timestamp
- * @property {SharePermissions|null} permissions
  */
 
 /**
  * @typedef {Object} UpdateShare
- * @property {string|null} password
- * @property {number|null} expires_at - timestamp
- * @property {SharePermissions|null} permissions
+ * @property {string|null}  [password]
+ * @property {number|null}  [expires_at]
  */
 
 /**
@@ -284,11 +274,12 @@
 /**
  * @typedef {Object} Grant
  * @property {string} id
- * @property {number} granted_at
+ * @property {string} granted_at  - ISO-8601 datetime string.
  * @property {string} granted_by
  * @property {Subject} subject
  * @property {PermissionTypeEnum} permission
  * @property {Resource} resource
+ * @property {string|null} [expires_at]  - ISO-8601 datetime string, or absent/null for no expiry.
  */
 
 /**
@@ -331,6 +322,35 @@
  * @typedef {Object} SharedWithMeResponse
  * @property {SharedWithMeItem[]}  items
  * @property {string|undefined}    [next_cursor]  - Absent when the last page is reached.
+ */
+
+/**
+ * One (subject, permissions) entry within an outgoing resource item.
+ * @typedef {Object} OutgoingResourceGrant
+ * @property {string}                    grant_id
+ * @property {'user'|'token'}            subject_type
+ * @property {string}                    subject_id
+ * @property {string}                    subject_display - Username (users) or share name (tokens).
+ * @property {'viewer'|'editor'|'admin'} role
+ * @property {string}                    granted_at   - ISO-8601
+ * @property {string|null}               [expires_at] - ISO-8601 or absent.
+ * @property {boolean}                   has_password - True when a token subject has a password set.
+ */
+
+/**
+ * One item returned by `GET /api/grants/outgoing/resources`.
+ * @typedef {Object} OutgoingResourceItem
+ * @property {ResourceTypeEnum}          resource_type
+ * @property {string}                    first_shared_at  - ISO-8601 earliest grant date.
+ * @property {FileItem|FolderItem}       resource         - Full resource details.
+ * @property {OutgoingResourceGrant[]}   grants           - One entry per (subject, permissions).
+ */
+
+/**
+ * Response for `GET /api/grants/outgoing/resources`.
+ * @typedef {Object} OutgoingResourcesResponse
+ * @property {OutgoingResourceItem[]}  items
+ * @property {string|undefined}        [next_cursor]  - Absent when the last page is reached.
  */
 
 /**
@@ -405,6 +425,7 @@
  * @property {Grant[]}       _grants - All grants for this subject on the resource (may be > 1).
  * @property {ShareRoleEnum} role    - Derived role label shown in the UI.
  * @property {'keep'|'remove'|'change'|'new'} _op - Pending local operation.
+ * @property {string|null}  [expires_at]  - YYYY-MM-DD expiry date string, or null for no expiry.
  */
 
 /**

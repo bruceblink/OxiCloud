@@ -714,6 +714,8 @@
     },
     "groupby": {
         "none": "None",
+        "byFiles": "By files",
+        "sharedWith": "Shared with",
         "title": "Group by",
         "type": "Type",
         "type.folders": "Folders",

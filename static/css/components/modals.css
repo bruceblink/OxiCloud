@@ -315,7 +315,7 @@
 /* Wider, taller container; body becomes a zero-padding scrollable slot.       */
 
 .modal-container--panel {
-    width: 520px;
+    width: 620px;
     max-width: 96vw;
     max-height: 88vh;
     display: flex;

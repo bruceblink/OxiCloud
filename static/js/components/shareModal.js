@@ -20,12 +20,12 @@ import { fileSharing } from '../features/sharing/fileSharing.js';
 import { addressBook, SYSTEM_BOOK_ID } from '../model/addressBook.js';
 import { grants } from '../model/grants.js';
 import { systemUsers } from '../model/systemUsers.js';
+import { buildExpiryChip } from '../utils/expiryChip.js';
+import { buildPasswordChip } from '../utils/passwordChip.js';
 import { Modal } from './modal.js';
 import { createUserVignette } from './userVignette.js';
 
 /** @import {FileItem, FolderItem, Grant, ContactItem, MemberEntry, LinkEntry, DraftLink, ShareRoleEnum} from '../core/types.js' */
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 /** Permissions that belong to each role (must mirror the Rust DTO). */
 const ROLE_PERMISSIONS = {
@@ -101,8 +101,14 @@ const shareModal = {
     /** @type {ShareRoleEnum} */
     _stagedRole: 'viewer',
 
+    /** @type {string|null} — YYYY-MM-DD expiry for the next staged users batch */
+    _stagedExpiry: null,
+
     /** @type {HTMLElement|null} — body node injected into Modal */
     _bodyEl: null,
+
+    /** @type {(() => void)|null} — called after changes are successfully committed */
+    _onApplied: null,
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -110,15 +116,18 @@ const shareModal = {
      * Open the share modal for a file or folder.
      * @param {FileItem|FolderItem} item
      * @param {'file'|'folder'}     itemType
+     * @param {(() => void)=}       onApplied - called after changes are successfully committed
      */
-    async open(item, itemType) {
+    async open(item, itemType, onApplied) {
         this._item = item;
         this._itemType = itemType;
+        this._onApplied = onApplied ?? null;
         this._localMembers = [];
         this._localLinks = [];
         this._newLinks = [];
         this._stagedUsers = [];
         this._stagedRole = 'viewer';
+        this._stagedExpiry = null;
 
         const title = `${i18n.t('share.shareOf', 'Share of:')} ${item.name}`;
 
@@ -130,6 +139,7 @@ const shareModal = {
             icon: 'fa-share-alt',
             content: this._bodyEl,
             confirmText: i18n.t('actions.apply', 'Apply'),
+            confirmDisabled: true,
             onConfirm: () => {
                 this._applyAll();
             } // intentionally discard Promise
@@ -162,6 +172,17 @@ const shareModal = {
      */
     close() {
         Modal.close(false);
+    },
+
+    // ── Apply-button state ─────────────────────────────────────────────────────
+
+    /** @returns {boolean} */
+    _hasPendingChanges() {
+        return this._localMembers.some((m) => m._op !== 'keep') || this._localLinks.some((e) => e._op !== 'keep') || this._newLinks.length > 0;
+    },
+
+    _syncApplyBtn() {
+        if (Modal.confirmBtn) Modal.confirmBtn.disabled = !this._hasPendingChanges();
     },
 
     // ── Skeleton ───────────────────────────────────────────────────────────────
@@ -248,9 +269,9 @@ const shareModal = {
         const roleSelect = document.createElement('select');
         roleSelect.className = 'smd-role-select';
         for (const [val, label] of [
-            ['viewer', i18n.t('share.role.viewer', 'Viewer')],
-            ['editor', i18n.t('share.role.editor', 'Editor')],
-            ['admin', i18n.t('share.role.admin', 'Admin')]
+            ['viewer', i18n.t('share.role.canView', 'Can view')],
+            ['editor', i18n.t('share.role.canEdit', 'Can edit')],
+            ['admin', i18n.t('share.role.canManage', 'Can manage')]
         ]) {
             const opt = document.createElement('option');
             opt.value = val;
@@ -260,6 +281,11 @@ const shareModal = {
         }
         roleSelect.addEventListener('change', () => {
             this._stagedRole = /** @type {ShareRoleEnum} */ (roleSelect.value);
+        });
+
+        // ── Expiry chip ──────────────────────────────────────────────────────
+        const expiryChip = this._buildExpiryChip(null, (v) => {
+            this._stagedExpiry = v;
         });
 
         // ── Add button ───────────────────────────────────────────────────────
@@ -316,6 +342,7 @@ const shareModal = {
 
         row.appendChild(wrap);
         row.appendChild(roleSelect);
+        row.appendChild(expiryChip);
         row.appendChild(addBtn);
 
         return row;
@@ -419,7 +446,7 @@ const shareModal = {
             /** @type {Grant} */
             const placeholderGrant = {
                 id: '', // not yet persisted
-                granted_at: 0,
+                granted_at: '',
                 granted_by: '',
                 subject: { type: 'user', id: contact.id },
                 permission: /** @type {import('../core/types.js').PermissionTypeEnum} */ (ROLE_PERMISSIONS[this._stagedRole][0]),
@@ -429,7 +456,8 @@ const shareModal = {
                 grant: placeholderGrant,
                 _grants: [], // no server grants yet — nothing to revoke on remove
                 role: this._stagedRole,
-                _op: 'new'
+                _op: 'new',
+                expires_at: this._stagedExpiry
             });
         }
         this._stagedUsers = [];
@@ -450,6 +478,7 @@ const shareModal = {
     _refreshMemberGroups() {
         const container = /** @type {HTMLElement|null} */ (document.getElementById('smd-member-groups'));
         if (container) this._renderMemberGroupsInto(container);
+        this._syncApplyBtn();
     },
 
     /**
@@ -471,9 +500,9 @@ const shareModal = {
             header.className = 'smd-group-header';
 
             const labelMap = {
-                admin: i18n.t('share.role.admin', 'Admin'),
-                editor: i18n.t('share.role.editor', 'Editor'),
-                viewer: i18n.t('share.role.viewer', 'Viewer')
+                admin: i18n.t('share.role.canManage', 'Can manage'),
+                editor: i18n.t('share.role.canEdit', 'Can edit'),
+                viewer: i18n.t('share.role.canView', 'Can view')
             };
             const badge = document.createElement('span');
             badge.className = 'smd-group-badge';
@@ -504,9 +533,9 @@ const shareModal = {
         const roleSelect = document.createElement('select');
         roleSelect.className = 'smd-member-role-select';
         for (const [val, label] of [
-            ['viewer', i18n.t('share.role.viewer', 'Viewer')],
-            ['editor', i18n.t('share.role.editor', 'Editor')],
-            ['admin', i18n.t('share.role.admin', 'Admin')]
+            ['viewer', i18n.t('share.role.canView', 'Can view')],
+            ['editor', i18n.t('share.role.canEdit', 'Can edit')],
+            ['admin', i18n.t('share.role.canManage', 'Can manage')]
         ]) {
             const opt = document.createElement('option');
             opt.value = val;
@@ -521,6 +550,19 @@ const shareModal = {
             this._refreshMemberGroups();
         });
 
+        // ── Expiry chip ──────────────────────────────────────────────────────
+        // Initialise entry.expires_at once from the representative grant so that
+        // role-only changes preserve the current expiry across row rebuilds.
+        if (!Object.hasOwn(entry, 'expires_at')) {
+            const raw = entry.grant.expires_at ?? null;
+            entry.expires_at = raw ? String(raw).slice(0, 10) : null;
+        }
+        const expiryChip = this._buildExpiryChip(entry.expires_at, (v) => {
+            entry.expires_at = v;
+            if (entry._op !== 'new') entry._op = 'change';
+            this._syncApplyBtn();
+        });
+
         const removeBtn = document.createElement('button');
         removeBtn.className = 'smd-row-action';
         removeBtn.title = i18n.t('actions.remove', 'Remove');
@@ -532,8 +574,29 @@ const shareModal = {
 
         row.appendChild(vignette);
         row.appendChild(roleSelect);
+        row.appendChild(expiryChip);
         row.appendChild(removeBtn);
         return row;
+    },
+
+    // ── Expiry chip toggle ─────────────────────────────────────────────────────
+
+    /**
+     * @param {string|null} initialValue  - YYYY-MM-DD or null
+     * @param {(v: string|null) => void}  onChange
+     * @returns {HTMLElement}
+     */
+    _buildExpiryChip(initialValue, onChange) {
+        return buildExpiryChip(initialValue, onChange);
+    },
+
+    /**
+     * @param {boolean}              initialHasPassword
+     * @param {(v: string) => void}  onChange  '' = remove / clear, non-empty = set new password
+     * @returns {HTMLElement}
+     */
+    _buildPasswordChip(initialHasPassword, onChange) {
+        return buildPasswordChip(initialHasPassword, onChange);
     },
 
     // ── Links section ──────────────────────────────────────────────────────────
@@ -550,29 +613,72 @@ const shareModal = {
         title.textContent = i18n.t('share.publicLinks', 'Public links');
         section.appendChild(title);
 
+        section.appendChild(this._buildAddLinkRow());
+
         const listEl = document.createElement('div');
         listEl.id = 'smd-links-list';
         this._renderLinksInto(listEl);
         section.appendChild(listEl);
 
-        const newLinkBtn = document.createElement('button');
-        newLinkBtn.className = 'smd-new-link-btn';
-        newLinkBtn.innerHTML = `<i class="fas fa-plus"></i> ${i18n.t('share.createLink', 'Create new public link')}`;
-        newLinkBtn.id = 'smd-new-link-btn';
+        return section;
+    },
 
-        const newLinkForm = document.createElement('div');
-        newLinkForm.id = 'smd-new-link-form';
-        newLinkForm.className = 'smd-new-link-form hidden';
-        newLinkForm.appendChild(this._buildNewLinkForm(newLinkBtn, newLinkForm));
+    /**
+     * Always-visible add-link row — mirrors the People search row layout.
+     * Rebuilds itself after each Add to reset chip state.
+     * @returns {HTMLElement}
+     */
+    _buildAddLinkRow() {
+        const row = document.createElement('div');
+        row.className = 'smd-search-row';
+        row.id = 'smd-add-link-row';
 
-        newLinkBtn.addEventListener('click', () => {
-            newLinkBtn.classList.add('hidden');
-            newLinkForm.classList.remove('hidden');
+        // Name input — wrapped in smd-search-wrap so it inherits flex:1
+        const wrap = document.createElement('div');
+        wrap.className = 'smd-search-wrap';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'smd-search-input';
+        nameInput.placeholder = i18n.t('share.linkNamePlaceholder', 'Link name (optional)');
+        wrap.appendChild(nameInput);
+
+        /** @type {string|null} */
+        let stagedPassword = null;
+        /** @type {string|null} */
+        let stagedExpiry = null;
+
+        const pwChip = this._buildPasswordChip(false, (v) => {
+            stagedPassword = v || null;
         });
 
-        section.appendChild(newLinkBtn);
-        section.appendChild(newLinkForm);
-        return section;
+        const expChip = this._buildExpiryChip(null, (v) => {
+            stagedExpiry = v;
+        });
+
+        const addBtn = document.createElement('button');
+        addBtn.className = 'smd-add-btn btn btn-secondary';
+        addBtn.textContent = i18n.t('actions.add', 'Add');
+
+        addBtn.addEventListener('click', () => {
+            /** @type {DraftLink} */
+            const draft = {
+                name: nameInput.value.trim(),
+                password: stagedPassword,
+                expires_at: stagedExpiry
+            };
+            this._newLinks.push(draft);
+            this._refreshLinks();
+            // Reset row (also resets chips via closure state)
+            const fresh = this._buildAddLinkRow();
+            row.replaceWith(fresh);
+        });
+
+        row.appendChild(wrap);
+        row.appendChild(pwChip);
+        row.appendChild(expChip);
+        row.appendChild(addBtn);
+
+        return row;
     },
 
     /**
@@ -595,6 +701,7 @@ const shareModal = {
     _refreshLinks() {
         const container = /** @type {HTMLElement|null} */ (document.getElementById('smd-links-list'));
         if (container) this._renderLinksInto(container);
+        this._syncApplyBtn();
     },
 
     /**
@@ -603,87 +710,65 @@ const shareModal = {
      */
     _buildLinkRow(entry) {
         const share = entry.share;
-        const draft = entry._op === 'edit' ? entry._draft : null;
 
-        // Display values: prefer draft overrides when in edit-pending state
-        const displayName = draft?.name ? draft.name : share.item_name || i18n.t('share.sharedLink', 'Shared link');
-        const displayPw = draft ? draft.password !== null : share.has_password;
-        const displayExp = draft ? draft.expires_at : share.expires_at ? fileSharing.formatExpirationDate(share.expires_at) : null;
+        const ensureDraft = () => {
+            if (!entry._draft) {
+                entry._draft = {
+                    name: share.item_name || '',
+                    password: null,
+                    expires_at: share.expires_at ? new Date(share.expires_at * 1000).toISOString().slice(0, 10) : null
+                };
+                entry._op = 'edit';
+                this._syncApplyBtn();
+            }
+            return entry._draft;
+        };
+
+        // Derive current display values from draft if present, otherwise from share
+        const currentHasPassword = entry._draft
+            ? entry._draft.password === ''
+                ? false
+                : entry._draft.password
+                  ? true
+                  : share.has_password
+            : share.has_password;
+        const currentExpiry = entry._draft ? entry._draft.expires_at : share.expires_at ? new Date(share.expires_at * 1000).toISOString().slice(0, 10) : null;
 
         const row = document.createElement('div');
         row.className = 'smd-link-row';
 
-        const icon = document.createElement('div');
-        icon.className = 'smd-link-icon';
-        icon.innerHTML = '<i class="fas fa-link"></i>';
-
-        const info = document.createElement('div');
-        info.className = 'smd-link-info';
-
         const name = document.createElement('div');
         name.className = 'smd-link-name';
-        name.textContent = displayName;
+        name.textContent = entry._draft?.name || share.item_name || i18n.t('share.sharedLink', 'Shared link');
 
-        const tags = document.createElement('div');
-        tags.className = 'smd-link-tags';
-        if (displayPw) {
-            const t = document.createElement('span');
-            t.className = 'smd-link-tag';
-            t.innerHTML = `<i class="fas fa-lock"></i> ${i18n.t('share.passwordProtected', 'Password')}`;
-            tags.appendChild(t);
-        }
-        if (displayExp) {
-            const t = document.createElement('span');
-            t.className = 'smd-link-tag';
-            t.innerHTML = `<i class="fas fa-clock"></i> ${displayExp}`;
-            tags.appendChild(t);
-        }
-
-        info.appendChild(name);
-        if (tags.children.length) info.appendChild(tags);
-
-        const actions = document.createElement('div');
-        actions.className = 'smd-link-actions';
-
-        // Copy
         const copyBtn = document.createElement('button');
         copyBtn.className = 'smd-row-action';
-        copyBtn.title = i18n.t('actions.copy', 'Copy');
+        copyBtn.title = i18n.t('actions.copy', 'Copy link');
         copyBtn.innerHTML = '<i class="fas fa-copy"></i>';
         copyBtn.addEventListener('click', () => fileSharing.copyLinkToClipboard(share.url));
 
-        // Edit
-        const editBtn = document.createElement('button');
-        editBtn.className = 'smd-row-action';
-        editBtn.title = i18n.t('actions.edit', 'Edit');
-        editBtn.innerHTML = '<i class="fas fa-pencil-alt"></i>';
-        editBtn.addEventListener('click', () => {
-            const panel = row.nextElementSibling;
-            if (panel?.classList.contains('smd-edit-panel')) {
-                panel.classList.toggle('hidden');
-            } else {
-                const editPanel = this._buildEditPanel(entry, row);
-                row.after(editPanel);
-            }
+        const pwChip = this._buildPasswordChip(currentHasPassword, (v) => {
+            ensureDraft().password = v;
         });
 
-        // Delete
+        const expChip = this._buildExpiryChip(currentExpiry, (v) => {
+            ensureDraft().expires_at = v;
+        });
+
         const delBtn = document.createElement('button');
         delBtn.className = 'smd-row-action';
         delBtn.title = i18n.t('actions.delete', 'Delete');
-        delBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
+        delBtn.innerHTML = '<i class="fas fa-times"></i>';
         delBtn.addEventListener('click', () => {
             entry._op = 'remove';
             this._refreshLinks();
         });
 
-        actions.appendChild(copyBtn);
-        actions.appendChild(editBtn);
-        actions.appendChild(delBtn);
-
-        row.appendChild(icon);
-        row.appendChild(info);
-        row.appendChild(actions);
+        row.appendChild(name);
+        row.appendChild(copyBtn);
+        row.appendChild(pwChip);
+        row.appendChild(expChip);
+        row.appendChild(delBtn);
         return row;
     },
 
@@ -695,42 +780,21 @@ const shareModal = {
         const row = document.createElement('div');
         row.className = 'smd-link-row';
 
-        const icon = document.createElement('div');
-        icon.className = 'smd-link-icon';
-        icon.innerHTML = '<i class="fas fa-link"></i>';
-
-        const info = document.createElement('div');
-        info.className = 'smd-link-info';
-
         const name = document.createElement('div');
         name.className = 'smd-link-name';
         name.textContent = draft.name || i18n.t('share.newLink', 'New link');
 
-        const tags = document.createElement('div');
-        tags.className = 'smd-link-tags';
-        if (draft.password) {
-            const t = document.createElement('span');
-            t.className = 'smd-link-tag';
-            t.innerHTML = `<i class="fas fa-lock"></i> ${i18n.t('share.passwordProtected', 'Password')}`;
-            tags.appendChild(t);
-        }
-        if (draft.expires_at) {
-            const t = document.createElement('span');
-            t.className = 'smd-link-tag';
-            t.innerHTML = `<i class="fas fa-clock"></i> ${draft.expires_at}`;
-            tags.appendChild(t);
-        }
-
         const pending = document.createElement('span');
         pending.className = 'smd-link-tag';
         pending.textContent = i18n.t('share.pending', 'Pending');
-        tags.appendChild(pending);
 
-        info.appendChild(name);
-        if (tags.children.length) info.appendChild(tags);
+        const pwChip = this._buildPasswordChip(!!draft.password, (v) => {
+            draft.password = v || null;
+        });
 
-        const actions = document.createElement('div');
-        actions.className = 'smd-link-actions';
+        const expChip = this._buildExpiryChip(draft.expires_at, (v) => {
+            draft.expires_at = v;
+        });
 
         const delBtn = document.createElement('button');
         delBtn.className = 'smd-row-action';
@@ -741,156 +805,12 @@ const shareModal = {
             this._refreshLinks();
         });
 
-        actions.appendChild(delBtn);
-        row.appendChild(icon);
-        row.appendChild(info);
-        row.appendChild(actions);
+        row.appendChild(name);
+        row.appendChild(pending);
+        row.appendChild(pwChip);
+        row.appendChild(expChip);
+        row.appendChild(delBtn);
         return row;
-    },
-
-    /**
-     * @param {LinkEntry} entry
-     * @param {HTMLElement} row
-     * @returns {HTMLElement}
-     */
-    _buildEditPanel(entry, row) {
-        const panel = document.createElement('div');
-        panel.className = 'smd-edit-panel';
-
-        const pwLabel = document.createElement('label');
-        pwLabel.textContent = i18n.t('dialogs.password', 'Password');
-        const pwInput = document.createElement('input');
-        pwInput.type = 'password';
-        pwInput.className = 'smd-edit-input';
-        pwInput.placeholder = i18n.t('share.passwordPlaceholder', 'Leave empty to keep unchanged');
-
-        const expLabel = document.createElement('label');
-        expLabel.textContent = i18n.t('dialogs.expiration', 'Expiration date');
-        const expInput = document.createElement('input');
-        expInput.type = 'date';
-        expInput.className = 'smd-edit-input';
-        if (entry.share.expires_at) {
-            expInput.value = new Date(entry.share.expires_at * 1000).toISOString().slice(0, 10);
-        }
-
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'smd-edit-panel-actions';
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'btn btn-secondary';
-        cancelBtn.textContent = i18n.t('actions.cancel', 'Cancel');
-        cancelBtn.addEventListener('click', () => panel.remove());
-
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn btn-primary';
-        saveBtn.textContent = i18n.t('actions.save', 'Save');
-        saveBtn.addEventListener('click', () => {
-            entry._op = 'edit';
-            entry._draft = {
-                name: entry.share.item_name || '',
-                password: pwInput.value || null,
-                expires_at: expInput.value || null
-            };
-            panel.remove();
-            this._refreshLinks();
-        });
-
-        actionsDiv.appendChild(cancelBtn);
-        actionsDiv.appendChild(saveBtn);
-
-        panel.appendChild(pwLabel);
-        panel.appendChild(pwInput);
-        panel.appendChild(expLabel);
-        panel.appendChild(expInput);
-        panel.appendChild(actionsDiv);
-
-        void row; // row is unused — panel is inserted via row.after() in caller
-        return panel;
-    },
-
-    /**
-     * @param {HTMLButtonElement} newLinkBtn
-     * @param {HTMLElement}       formWrapper
-     * @returns {HTMLElement}
-     */
-    _buildNewLinkForm(newLinkBtn, formWrapper) {
-        const inner = document.createElement('div');
-
-        const nameLabel = document.createElement('label');
-        nameLabel.textContent = i18n.t('share.linkName', 'Link name');
-        const nameInput = document.createElement('input');
-        nameInput.type = 'text';
-        nameInput.className = 'smd-edit-input';
-        nameInput.placeholder = i18n.t('share.linkNamePlaceholder', 'Optional name');
-
-        const pwToggleLabel = document.createElement('label');
-        pwToggleLabel.className = 'smd-pw-toggle';
-        const pwCheckbox = document.createElement('input');
-        pwCheckbox.type = 'checkbox';
-        pwToggleLabel.appendChild(pwCheckbox);
-        pwToggleLabel.appendChild(document.createTextNode(` ${i18n.t('share.addPassword', 'Add password')}`));
-
-        const pwInput = document.createElement('input');
-        pwInput.type = 'password';
-        pwInput.className = 'smd-edit-input hidden';
-        pwInput.placeholder = i18n.t('dialogs.password', 'Password');
-        pwCheckbox.addEventListener('change', () => {
-            pwInput.classList.toggle('hidden', !pwCheckbox.checked);
-        });
-
-        const expLabel = document.createElement('label');
-        expLabel.textContent = i18n.t('dialogs.expiration', 'Expiration date');
-        const expInput = document.createElement('input');
-        expInput.type = 'date';
-        expInput.className = 'smd-edit-input';
-
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'smd-new-link-form-actions';
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'btn btn-secondary';
-        cancelBtn.textContent = i18n.t('actions.cancel', 'Cancel');
-        cancelBtn.addEventListener('click', () => {
-            formWrapper.classList.add('hidden');
-            newLinkBtn.classList.remove('hidden');
-        });
-
-        const addBtn = document.createElement('button');
-        addBtn.className = 'btn btn-primary';
-        addBtn.textContent = i18n.t('share.addLink', 'Add link');
-        addBtn.addEventListener('click', () => {
-            /** @type {DraftLink} */
-            const draft = {
-                name: nameInput.value.trim(),
-                password: pwCheckbox.checked ? pwInput.value || null : null,
-                expires_at: expInput.value || null
-            };
-            this._newLinks.push(draft);
-            this._refreshLinks();
-
-            // Reset form
-            nameInput.value = '';
-            pwCheckbox.checked = false;
-            pwInput.value = '';
-            pwInput.classList.add('hidden');
-            expInput.value = '';
-
-            formWrapper.classList.add('hidden');
-            newLinkBtn.classList.remove('hidden');
-        });
-
-        actionsDiv.appendChild(cancelBtn);
-        actionsDiv.appendChild(addBtn);
-
-        inner.appendChild(nameLabel);
-        inner.appendChild(nameInput);
-        inner.appendChild(pwToggleLabel);
-        inner.appendChild(pwInput);
-        inner.appendChild(expLabel);
-        inner.appendChild(expInput);
-        inner.appendChild(actionsDiv);
-
-        return inner;
     },
 
     // ── Apply ──────────────────────────────────────────────────────────────────
@@ -911,6 +831,8 @@ const shareModal = {
         try {
             // ── Grants ─────────────────────────────────────────────────────────
             for (const m of this._localMembers) {
+                // Convert YYYY-MM-DD from date input to ISO-8601 datetime (midnight UTC).
+                const expiresIso = m.expires_at ? new Date(`${m.expires_at}T00:00:00Z`).toISOString() : null;
                 if (m._op === 'remove') {
                     // Revoke every individual grant for this subject (one per permission).
                     for (const g of m._grants) {
@@ -920,13 +842,15 @@ const shareModal = {
                     await grants.updateRole({
                         subject: { type: m.grant.subject.type, id: m.grant.subject.id },
                         resource: { type: itemType, id: item.id },
-                        role: m.role
+                        role: m.role,
+                        expires_at: expiresIso
                     });
                 } else if (m._op === 'new') {
                     await grants.createGrant({
                         subject: { type: m.grant.subject.type, id: m.grant.subject.id },
                         resource: { type: itemType, id: item.id },
-                        role: m.role
+                        role: m.role,
+                        expires_at: expiresIso
                     });
                 }
             }
@@ -939,8 +863,7 @@ const shareModal = {
                     const expiresTs = e._draft.expires_at ? Math.floor(new Date(e._draft.expires_at).getTime() / 1000) : null;
                     await fileSharing.updateSharedLink(e.share.id, {
                         password: e._draft.password,
-                        expires_at: expiresTs,
-                        permissions: null
+                        expires_at: expiresTs
                     });
                 }
             }
@@ -970,6 +893,7 @@ const shareModal = {
             ui.setSharedVisualState(item.id, itemType, hasAnyShare);
 
             Modal.close(true);
+            this._onApplied?.();
         } catch (err) {
             console.error('shareModal._applyAll error:', err);
             if (Modal.confirmBtn) Modal.confirmBtn.disabled = false;

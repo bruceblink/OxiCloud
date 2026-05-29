@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use utoipa::ToSchema;
 
 use crate::application::dtos::display_helpers::{
@@ -56,6 +56,9 @@ pub async fn get_favorites(
     auth_user: AuthUser,
 ) -> impl IntoResponse {
     let user_id = auth_user.id;
+    warn!(
+        "Deprecated endpoint called: GET /api/favorites — use GET /api/favorites/resources instead"
+    );
 
     match favorites_service.get_favorites(user_id).await {
         Ok(favorites) => {

@@ -120,3 +120,7 @@
     background: var(--color-bg-alt);
     color: var(--color-accent);
 }
+
+[data-theme="dark"] .smd-expiry-date-input::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+}

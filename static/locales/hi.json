@@ -723,7 +723,9 @@
         "modifiedAt": "संशोधन की तारीख",
         "createdAt": "बनाने की तारीख",
         "size": "आकार",
-        "favoriteDate": "पसंदीदा की तारीख"
+        "favoriteDate": "पसंदीदा की तारीख",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "आज",

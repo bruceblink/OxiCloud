@@ -723,7 +723,9 @@
         "modifiedAt": "수정 날짜",
         "createdAt": "생성 날짜",
         "size": "크기",
-        "favoriteDate": "즐겨찾기 날짜"
+        "favoriteDate": "즐겨찾기 날짜",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "오늘",

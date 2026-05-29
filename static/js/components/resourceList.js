@@ -20,8 +20,8 @@
 
 import { escapeHtml, formatDateTime, formatFileSize } from '../core/formatters.js';
 import { i18n } from '../core/i18n.js';
-import { thumbnail } from '../features/thumbnail.js';
 import { systemUsers } from '../model/systemUsers.js';
+import { buildResourceIcon } from './resourceIcon.js';
 import { createUserVignette } from './userVignette.js';
 
 /**
@@ -55,7 +55,9 @@ import { createUserVignette } from './userVignette.js';
  * @property {(item: FileItem|FolderItem) => Promise<void>} [onFavoriteToggle]
  *   Called when the user clicks the favorite-star button.
  * @property {(item: FileItem|FolderItem, event: MouseEvent) => void} [onContextMenu]
- *   Called for the three-dots button click, right-click, and shared-badge click.
+ *   Called for the three-dots button click and right-click.
+ * @property {(item: FileItem|FolderItem) => void} [onShareBadgeClick]
+ *   Called when the user clicks the shared badge. Falls back to onContextMenu if absent.
  * @property {(selected: Array<FileItem|FolderItem>) => void} [onSelectionChange]
  *   Called whenever the selection set changes.
  */
@@ -333,6 +335,19 @@ export class ResourceListComponent {
         item.querySelector('.file-badge-shared')?.classList.toggle('hidden', !isShared);
     }
 
+    /**
+     * Re-evaluate the shared badge for every currently rendered item using the
+     * `isShared` callback from config.  Call this after the grants cache is refreshed.
+     */
+    refreshSharedBadges() {
+        if (!this._cfg.isShared) return;
+        for (const item of this._items.values()) {
+            const isFile = 'mime_type' in item;
+            const type = /** @type {'file'|'folder'} */ (isFile ? 'file' : 'folder');
+            this.setSharedVisualState(item.id, type, this._cfg.isShared(item.id, type));
+        }
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────
 
     /**
@@ -444,9 +459,7 @@ export class ResourceListComponent {
         el.innerHTML = `
             ${cfg.selectable ? '<div class="checkbox-cell"><input type="checkbox" class="item-checkbox"></div>' : ''}
             <div class="name-cell">
-                <div class="file-icon folder-icon">
-                    <i class="fas fa-folder"></i>
-                </div>
+                <div class="resource-icon-slot"></div>
                 <span>${escapeHtml(folder.name)}</span>
                 ${cfg.showFavorite ? `<div class="file-badge file-badge-favorite${isFav ? '' : ' hidden'}"><i class="fas fa-star favorite-star-inline"></i></div>` : ''}
                 ${cfg.showShareBadge ? `<div class="file-badge file-badge-shared${isShared ? '' : ' hidden'}"><i class="fas fa-oxiexport"></i></div>` : ''}
@@ -461,6 +474,7 @@ export class ResourceListComponent {
             </div>
         `;
 
+        el.querySelector('.resource-icon-slot')?.replaceWith(buildResourceIcon(folder, 'folder'));
         this._bindItemEvents(el, folder);
         return el;
     }
@@ -472,8 +486,6 @@ export class ResourceListComponent {
      */
     _createFileItem(file) {
         const cfg = this._cfg;
-        const iconClass = file.icon_class || 'fas fa-file';
-        const iconSpecialClass = file.icon_special_class || '';
         const cat = file.category || '';
         const typeLabel = cat ? i18n.t(`files.file_types.${cat.toLowerCase()}`) || cat : i18n.t('files.file_types.document');
         const fileSize = file.size_formatted || formatFileSize(file.size);
@@ -481,7 +493,6 @@ export class ResourceListComponent {
         const formattedDate = formatDateTime(new Date(dateVal));
         const isFav = cfg.isFavorite ? cfg.isFavorite(file.id, 'file') : false;
         const isShared = cfg.isShared ? cfg.isShared(file.id, 'file') : false;
-        const canThumbnail = thumbnail?.canHandle(file) ?? false;
 
         const el = document.createElement('div');
         const modClass = cfg.itemModifierClass ? ` ${cfg.itemModifierClass}` : '';
@@ -496,10 +507,7 @@ export class ResourceListComponent {
         el.innerHTML = `
             ${cfg.selectable ? '<div class="checkbox-cell"><input type="checkbox" class="item-checkbox"></div>' : ''}
             <div class="name-cell">
-                <div class="file-icon ${iconSpecialClass}">
-                    ${canThumbnail ? `<img class="file-thumb" src="/api/files/${file.id}/thumbnail/icon" loading="lazy" alt="">` : ''}
-                    <i class="${iconClass}"></i>
-                </div>
+                <div class="resource-icon-slot"></div>
                 <span>${escapeHtml(file.name)}</span>
                 ${cfg.showFavorite ? `<div class="file-badge file-badge-favorite${isFav ? '' : ' hidden'}"><i class="fas fa-star favorite-star-inline"></i></div>` : ''}
                 ${cfg.showShareBadge ? `<div class="file-badge file-badge-shared${isShared ? '' : ' hidden'}"><i class="fas fa-oxiexport"></i></div>` : ''}
@@ -514,18 +522,7 @@ export class ResourceListComponent {
             </div>
         `;
 
-        const thumb = /** @type {HTMLImageElement | null} */ (el.querySelector('.file-thumb'));
-        if (thumb) {
-            thumb.addEventListener('error', () => {
-                console.log(`no thumbnail for ${file.id} (${file.name}), request thumbnail generation from client side`);
-                thumb.classList.add('hidden');
-                thumbnail?.queueGenerate(file, (dataUrl) => {
-                    thumb.src = dataUrl;
-                    thumb.classList.remove('hidden');
-                });
-            });
-        }
-
+        el.querySelector('.resource-icon-slot')?.replaceWith(buildResourceIcon(file, 'file'));
         this._bindItemEvents(el, file);
         return el;
     }
@@ -550,14 +547,18 @@ export class ResourceListComponent {
             });
         }
 
-        // Shared-badge click → treat as context-menu trigger (e.g. open share modal)
-        if (cfg.showShareBadge && cfg.onContextMenu) {
+        // Shared-badge click → open share modal (or fall back to context menu)
+        if (cfg.showShareBadge && (cfg.onShareBadgeClick || cfg.onContextMenu)) {
             const badge = el.querySelector('.file-badge-shared');
             badge?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.stopImmediatePropagation();
                 e.preventDefault();
-                cfg.onContextMenu?.(item, /** @type {MouseEvent} */ (e));
+                if (cfg.onShareBadgeClick) {
+                    cfg.onShareBadgeClick(item);
+                } else {
+                    cfg.onContextMenu?.(item, /** @type {MouseEvent} */ (e));
+                }
             });
         }
     }

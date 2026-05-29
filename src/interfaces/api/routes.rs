@@ -325,6 +325,7 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
                 get(grant_handler::list_shared_with_me),
             )
             .route("/outgoing", get(grant_handler::list_outgoing))
+            .route("/outgoing/resources", get(grant_handler::list_my_shares))
             .with_state(app_state.clone())
     };
 
@@ -337,8 +338,8 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
         };
 
         Router::new()
-            .route("/", get(get_favorites)) // deprecated, kept for compat
-            .route("/resources", get(list_favorites_resources)) // new cursor-paginated endpoint
+            .route("/", get(get_favorites)) // deprecated — kept for external compat
+            .route("/resources", get(list_favorites_resources))
             .route("/batch", post(favorites_handler::batch_add_favorites))
             .route(
                 "/{item_type}/{item_id}",
@@ -359,7 +360,7 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
         use crate::interfaces::api::handlers::recent_handler;
 
         Router::new()
-            .route("/", get(recent_handler::get_recent_items))
+            .route("/", get(recent_handler::get_recent_items)) // deprecated — kept for external compat
             .route("/resources", get(recent_handler::list_recent_resources))
             .route(
                 "/{item_type}/{item_id}",

@@ -723,7 +723,9 @@
         "modifiedAt": "Wijzigingsdatum",
         "createdAt": "Aanmaakdatum",
         "size": "Grootte",
-        "favoriteDate": "Favoritendatum"
+        "favoriteDate": "Favoritendatum",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "Vandaag",

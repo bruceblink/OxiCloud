@@ -490,6 +490,9 @@ pub async fn list_folder_contents(
     auth_user: AuthUser,
     path: Path<String>,
 ) -> axum::response::Response {
+    tracing::warn!(
+        "Deprecated endpoint called: GET /api/folders/{{id}}/contents — use GET /api/folders/{{id}}/resources?resource_types=folder instead"
+    );
     FolderHandler::list_folder_contents_impl(state, auth_user, path).await
 }
 
@@ -533,6 +536,9 @@ pub async fn list_folder_contents_paginated(
     path: Path<String>,
     pagination: Query<PaginationRequestDto>,
 ) -> axum::response::Response {
+    tracing::warn!(
+        "Deprecated endpoint called: GET /api/folders/{{id}}/contents/paginated — use GET /api/folders/{{id}}/resources instead"
+    );
     FolderHandler::list_folder_contents_paginated_impl(state, auth_user, path, pagination).await
 }
 

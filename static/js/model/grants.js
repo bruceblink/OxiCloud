@@ -1,5 +1,5 @@
 /**
- * @import {Grant, ResourceTypeEnum, SharedWithMeResponse} from '../core/types.js'
+ * @import {Grant, ResourceTypeEnum, SharedWithMeResponse, OutgoingResourcesResponse} from '../core/types.js'
  */
 
 import { getCsrfHeaders } from '../core/csrf.js';
@@ -105,6 +105,32 @@ const grants = {
 
         if (!response.ok) {
             throw new Error(`Failed to fetch shared-with-me items: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    },
+
+    /**
+     * Fetch a cursor-paginated list of resources the current user has shared
+     * with others, with full file / folder metadata resolved server-side.
+     *
+     * @param {object}  [opts]
+     * @param {number}  [opts.limit]   - Max items per page (1–200, default 50).
+     * @param {string}  [opts.cursor]  - Opaque cursor from a previous call.
+     * @param {string}  [opts.orderBy] - Sort: 'first_shared_at' | 'name' | 'type' | 'subject'.
+     * @param {boolean} [opts.reverse] - Reverse sort order.
+     * @returns {Promise<OutgoingResourcesResponse>}
+     */
+    async fetchMySharesPage({ limit = 50, cursor, orderBy, reverse = false } = {}) {
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (cursor) params.set('cursor', cursor);
+        if (orderBy) params.set('sort_by', orderBy);
+        if (reverse) params.set('reverse', 'true');
+
+        const response = await fetch(`/api/grants/outgoing/resources?${params}`);
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch my shares: HTTP ${response.status}`);
         }
 
         return response.json();

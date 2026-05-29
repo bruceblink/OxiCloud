@@ -1,0 +1,46 @@
+/* ── Link chip ───────────────────────────────────────────────────────────────
+ *
+ * Inline clickable element representing a share link.
+ * Usage: buildLinkChip(grant) → HTMLButtonElement with class .link-chip
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.link-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    padding: 2px 0;
+    border: none;
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+    transition: color 0.12s;
+}
+
+.link-chip:hover {
+    color: var(--color-accent);
+}
+
+.link-chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.link-chip__icon {
+    font-size: 12px;
+    color: var(--color-text-faint);
+    flex-shrink: 0;
+    transition: color 0.12s;
+}
+
+.link-chip:hover .link-chip__icon {
+    color: var(--color-accent);
+}
+
+.link-chip__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

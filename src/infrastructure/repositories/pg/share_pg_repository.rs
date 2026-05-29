@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::{
     application::ports::share_ports::ShareStoragePort,
     common::errors::DomainError,
-    domain::entities::share::{Share, ShareItemType, SharePermissions},
+    domain::entities::share::{Share, ShareItemType},
 };
 
 /// PostgreSQL implementation of [`ShareStoragePort`].
@@ -37,6 +37,8 @@ impl SharePgRepository {
     }
 
     /// Maps a [`sqlx::postgres::PgRow`] to the domain [`Share`] entity.
+    /// Expects columns: id, item_id, item_name, item_type, token, password_hash,
+    /// expires_at (derived from access_grants subquery), created_at, created_by, access_count.
     fn row_to_entity(row: &sqlx::postgres::PgRow) -> Result<Share, DomainError> {
         let id: Uuid = row
             .try_get("id")
@@ -52,10 +54,8 @@ impl SharePgRepository {
             DomainError::internal_error("Share", format!("Failed to read token: {e}"))
         })?;
         let password_hash: Option<String> = row.try_get("password_hash").unwrap_or(None);
+        // expires_at derived from access_grants subquery (unix seconds as i64)
         let expires_at: Option<i64> = row.try_get("expires_at").unwrap_or(None);
-        let permissions_read: bool = row.try_get("permissions_read").unwrap_or(true);
-        let permissions_write: bool = row.try_get("permissions_write").unwrap_or(false);
-        let permissions_reshare: bool = row.try_get("permissions_reshare").unwrap_or(false);
         let created_at: i64 = row.try_get("created_at").map_err(|e| {
             DomainError::internal_error("Share", format!("Failed to read created_at: {e}"))
         })?;
@@ -66,8 +66,6 @@ impl SharePgRepository {
 
         let item_type =
             ShareItemType::try_from(item_type_str.as_str()).unwrap_or(ShareItemType::File);
-        let permissions =
-            SharePermissions::new(permissions_read, permissions_write, permissions_reshare);
 
         Ok(Share::from_raw(
             id,
@@ -77,7 +75,6 @@ impl SharePgRepository {
             token,
             password_hash,
             expires_at.map(|v| v as u64),
-            permissions,
             created_at as u64,
             created_by,
             access_count as u64,
@@ -91,23 +88,18 @@ impl ShareStoragePort for SharePgRepository {
             r#"
             INSERT INTO storage.shares
                 (id, item_id, item_name, item_type, token, password_hash,
-                 expires_at, permissions_read, permissions_write, permissions_reshare,
                  created_at, created_by, access_count)
             VALUES
-                ($1, $2, $3, $4, $5, $6,
-                 $7, $8, $9, $10,
-                 $11, $12, $13)
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (id) DO UPDATE SET
-                item_name         = EXCLUDED.item_name,
-                password_hash     = EXCLUDED.password_hash,
-                expires_at        = EXCLUDED.expires_at,
-                permissions_read  = EXCLUDED.permissions_read,
-                permissions_write = EXCLUDED.permissions_write,
-                permissions_reshare = EXCLUDED.permissions_reshare,
-                access_count      = EXCLUDED.access_count
+                item_name     = EXCLUDED.item_name,
+                password_hash = EXCLUDED.password_hash,
+                access_count  = EXCLUDED.access_count
             RETURNING
                 id, item_id, item_name, item_type, token, password_hash,
-                expires_at, permissions_read, permissions_write, permissions_reshare,
+                (SELECT MIN(EXTRACT(EPOCH FROM ag.expires_at)::BIGINT)
+                 FROM storage.access_grants ag
+                 WHERE ag.subject_type = 'token' AND ag.subject_id = id) AS expires_at,
                 created_at, created_by, access_count
             "#,
         )
@@ -117,10 +109,6 @@ impl ShareStoragePort for SharePgRepository {
         .bind(share.item_type().to_string())
         .bind(share.token())
         .bind(share.password_hash())
-        .bind(share.expires_at().map(|v| v as i64))
-        .bind(share.permissions().read())
-        .bind(share.permissions().write())
-        .bind(share.permissions().reshare())
         .bind(share.created_at() as i64)
         .bind(share.created_by())
         .bind(share.access_count() as i64)
@@ -137,11 +125,13 @@ impl ShareStoragePort for SharePgRepository {
     async fn find_share_by_token(&self, token: &str) -> Result<Share, DomainError> {
         let row = sqlx::query(
             r#"
-            SELECT id, item_id, item_name, item_type, token, password_hash,
-                   expires_at, permissions_read, permissions_write, permissions_reshare,
-                   created_at, created_by, access_count
-            FROM storage.shares
-            WHERE token = $1
+            SELECT s.id, s.item_id, s.item_name, s.item_type, s.token, s.password_hash,
+                (SELECT MIN(EXTRACT(EPOCH FROM ag.expires_at)::BIGINT)
+                 FROM storage.access_grants ag
+                 WHERE ag.subject_type = 'token' AND ag.subject_id = s.id) AS expires_at,
+                s.created_at, s.created_by, s.access_count
+            FROM storage.shares s
+            WHERE s.token = $1
             "#,
         )
         .bind(token)
@@ -168,11 +158,13 @@ impl ShareStoragePort for SharePgRepository {
     ) -> Result<Share, DomainError> {
         let row = sqlx::query(
             r#"
-            SELECT id, item_id, item_name, item_type, token, password_hash,
-                   expires_at, permissions_read, permissions_write, permissions_reshare,
-                   created_at, created_by, access_count
-            FROM storage.shares
-            WHERE id = $1 AND created_by = $2
+            SELECT s.id, s.item_id, s.item_name, s.item_type, s.token, s.password_hash,
+                (SELECT MIN(EXTRACT(EPOCH FROM ag.expires_at)::BIGINT)
+                 FROM storage.access_grants ag
+                 WHERE ag.subject_type = 'token' AND ag.subject_id = s.id) AS expires_at,
+                s.created_at, s.created_by, s.access_count
+            FROM storage.shares s
+            WHERE s.id = $1 AND s.created_by = $2
             "#,
         )
         .bind(id)
@@ -224,12 +216,14 @@ impl ShareStoragePort for SharePgRepository {
     ) -> Result<Vec<Share>, DomainError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, item_id, item_name, item_type, token, password_hash,
-                   expires_at, permissions_read, permissions_write, permissions_reshare,
-                   created_at, created_by, access_count
-            FROM storage.shares
-            WHERE item_id = $1 AND item_type = $2 AND created_by = $3
-            ORDER BY created_at DESC
+            SELECT s.id, s.item_id, s.item_name, s.item_type, s.token, s.password_hash,
+                (SELECT MIN(EXTRACT(EPOCH FROM ag.expires_at)::BIGINT)
+                 FROM storage.access_grants ag
+                 WHERE ag.subject_type = 'token' AND ag.subject_id = s.id) AS expires_at,
+                s.created_at, s.created_by, s.access_count
+            FROM storage.shares s
+            WHERE s.item_id = $1 AND s.item_type = $2 AND s.created_by = $3
+            ORDER BY s.created_at DESC
             "#,
         )
         .bind(item_id)
@@ -249,27 +243,21 @@ impl ShareStoragePort for SharePgRepository {
         let row = sqlx::query(
             r#"
             UPDATE storage.shares SET
-                item_name         = $2,
-                password_hash     = $3,
-                expires_at        = $4,
-                permissions_read  = $5,
-                permissions_write = $6,
-                permissions_reshare = $7,
-                access_count      = $8
+                item_name     = $2,
+                password_hash = $3,
+                access_count  = $4
             WHERE id = $1
             RETURNING
                 id, item_id, item_name, item_type, token, password_hash,
-                expires_at, permissions_read, permissions_write, permissions_reshare,
+                (SELECT MIN(EXTRACT(EPOCH FROM ag.expires_at)::BIGINT)
+                 FROM storage.access_grants ag
+                 WHERE ag.subject_type = 'token' AND ag.subject_id = storage.shares.id) AS expires_at,
                 created_at, created_by, access_count
             "#,
         )
         .bind(share.id())
         .bind(share.item_name())
         .bind(share.password_hash())
-        .bind(share.expires_at().map(|v| v as i64))
-        .bind(share.permissions().read())
-        .bind(share.permissions().write())
-        .bind(share.permissions().reshare())
         .bind(share.access_count() as i64)
         .fetch_optional(&*self.db_pool)
         .await
@@ -296,13 +284,15 @@ impl ShareStoragePort for SharePgRepository {
         // Single query with window function — count + rows in one roundtrip
         let rows = sqlx::query(
             r#"
-            SELECT id, item_id, item_name, item_type, token, password_hash,
-                   expires_at, permissions_read, permissions_write, permissions_reshare,
-                   created_at, created_by, access_count,
-                   COUNT(*) OVER() AS total_count
-            FROM storage.shares
-            WHERE created_by = $1
-            ORDER BY created_at DESC
+            SELECT s.id, s.item_id, s.item_name, s.item_type, s.token, s.password_hash,
+                (SELECT MIN(EXTRACT(EPOCH FROM ag.expires_at)::BIGINT)
+                 FROM storage.access_grants ag
+                 WHERE ag.subject_type = 'token' AND ag.subject_id = s.id) AS expires_at,
+                s.created_at, s.created_by, s.access_count,
+                COUNT(*) OVER() AS total_count
+            FROM storage.shares s
+            WHERE s.created_by = $1
+            ORDER BY s.created_at DESC
             LIMIT $2 OFFSET $3
             "#,
         )

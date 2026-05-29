@@ -200,6 +200,13 @@ pub struct Grant {
     pub permission: Permission,
     pub granted_by: Uuid,
     pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Grant {
+    pub fn is_expired(&self) -> bool {
+        self.expires_at.is_some_and(|exp| exp < chrono::Utc::now())
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -250,6 +257,42 @@ pub struct IncomingGrantSummary {
     pub granted_at: chrono::DateTime<chrono::Utc>,
     /// Granter of the earliest grant.
     pub granted_by: Uuid,
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// OutgoingGrantEntry / OutgoingResourceSummary — per-subject grant within a
+// resource that the current user shared with others
+// ════════════════════════════════════════════════════════════════════════════
+
+/// One (subject, permissions) pair within an outgoing resource summary.
+/// The `subject_display` field is resolved by the SQL layer: username for
+/// `user` subjects, share item_name for `token` subjects.
+#[derive(Debug, Clone)]
+pub struct OutgoingGrantEntry {
+    pub grant_id: Uuid,
+    pub subject_type: String,
+    pub subject_id: Uuid,
+    /// Human-readable label: username (users) or share name (tokens).
+    pub subject_display: String,
+    /// All permissions held by this subject on the resource (aggregated).
+    pub permissions: Vec<Permission>,
+    pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// True when the token subject has a password set (`storage.shares.password_hash IS NOT NULL`).
+    /// Always `false` for `user` subjects.
+    pub has_password: bool,
+}
+
+/// All subjects that the current user has shared a single resource with,
+/// together with the resource type, id, and when it was first shared.
+#[derive(Debug, Clone)]
+pub struct OutgoingResourceSummary {
+    pub resource_type: ResourceKind,
+    pub resource_id: Uuid,
+    /// Earliest `granted_at` across all grants on this resource.
+    pub first_shared_at: chrono::DateTime<chrono::Utc>,
+    /// One entry per (subject, permissions) pair.
+    pub grants: Vec<OutgoingGrantEntry>,
 }
 
 // ════════════════════════════════════════════════════════════════════════════

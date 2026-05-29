@@ -1,0 +1,336 @@
+/* ── My Shares view ─────────────────────────────────────────────────────────
+ *
+ * BEM classes for the row-per-grant MySharesList component.
+ * All colors via var(--*).  Mobile-first layout.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Load-more wrapper ───────────────────────────────────────────────────── */
+
+.ms-load-more-wrapper {
+    display: flex;
+    justify-content: center;
+    padding: 16px 0 8px;
+}
+
+.ms-load-more-wrapper.hidden {
+    display: none;
+}
+
+/* ── Container: dissolve when lanes are present ──────────────────────────── */
+
+.files-list-view:has(.ms-lane) {
+    background-color: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+    gap: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Lane (swimlane card) ────────────────────────────────────────────────── */
+
+.ms-lane {
+    background-color: var(--color-item);
+    border-radius: 10px;
+    box-shadow: 0 1px 3px var(--color-shadow-xs);
+    overflow: hidden;
+}
+
+.ms-lane__header {
+    background: var(--color-bg-muted);
+    border-bottom: 1px solid var(--color-border-faint);
+}
+
+/* Vignette lane headers need the same padding as the resource row */
+.ms-lane__header .user-vignette {
+    padding: 10px 14px;
+    font-weight: 600;
+}
+
+.ms-lane__header .user-vignette .user-vignette__name {
+    font-size: 13px;
+    color: var(--color-text-heading);
+    font-weight: 600;
+}
+
+.ms-lane__body {
+    /* rows are direct children */
+}
+
+/* ── Resource lane header (items mode) ───────────────────────────────────── */
+
+.ms-resource-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+}
+
+/* Size the shared .file-icon component for inline use in myShares rows */
+.ms-resource-row .file-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+/* Smaller icon for child grant rows and inline resource links */
+.ms-grant-row__identity .file-icon,
+.ms-link-identity__resource .file-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.ms-resource-row__name {
+    flex: 1;
+    font-weight: 600;
+    color: var(--color-text);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-resource-row__name:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+.ms-resource-row__edit {
+    flex-shrink: 0;
+    font-size: 12px;
+    padding: 3px 8px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+.ms-resource-row__edit:hover {
+    opacity: 1;
+}
+
+/* ── Subject lane header (sharedWith mode — link bucket) ─────────────────── */
+
+.ms-link-lane-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+}
+
+.ms-link-lane-label__icon {
+    color: var(--color-text-faint);
+    font-size: 12px;
+}
+
+/* ── Grant row ───────────────────────────────────────────────────────────── */
+
+.ms-grant-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px 7px 28px;
+    border-bottom: 1px solid var(--color-border-faint);
+    transition: background 0.1s;
+}
+
+.ms-grant-row:last-child {
+    border-bottom: none;
+}
+
+.ms-grant-row:hover {
+    background: var(--color-bg-hover);
+}
+
+.ms-grant-row--expired {
+    opacity: 0.6;
+}
+
+/* ── Grant row — identity ─────────────────────────────────────────────────── */
+
+.ms-grant-row__identity {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ms-identity__name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-identity__resource-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-identity__resource-name:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+/* Token in sharedWith mode: arrow + resource link */
+
+.ms-link-identity__arrow {
+    font-size: 11px;
+    color: var(--color-text-faint);
+    flex-shrink: 0;
+}
+
+.ms-link-identity__resource {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-link-identity__resource:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+/* ── Role pill ───────────────────────────────────────────────────────────── */
+
+.ms-role-pill {
+    display: inline-block;
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ms-role-pill--manage {
+    background: var(--color-badge-orange-bg);
+    color: var(--color-badge-orange-text);
+}
+
+.ms-role-pill--edit {
+    background: var(--color-badge-blue-bg);
+    color: var(--color-badge-blue-text);
+}
+
+.ms-role-pill--view {
+    background: var(--color-bg-muted);
+    color: var(--color-text-muted);
+}
+
+/* ── Expiry chip ─────────────────────────────────────────────────────────── */
+
+.ms-expiry-chip {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.ms-expiry-chip--never {
+    background: var(--color-bg-muted);
+    color: var(--color-text-faint);
+}
+
+.ms-expiry-chip--active {
+    background: var(--color-bg-muted);
+    color: var(--color-text-muted);
+}
+
+.ms-expiry-chip--soon {
+    background: var(--color-badge-amber-bg);
+    color: var(--color-badge-amber-text);
+}
+
+.ms-expiry-chip--expired {
+    background: var(--color-danger-lighter);
+    color: var(--color-danger-text-alt);
+}
+
+/* ── Kebab / icon buttons ────────────────────────────────────────────────── */
+
+.ms-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: 11px;
+    flex-shrink: 0;
+    transition:
+        background 0.12s,
+        color 0.12s;
+}
+
+.ms-btn-icon:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+}
+
+.ms-btn-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ms-kebab-btn {
+    margin-left: auto;
+}
+
+/* ── Context menu current-item indicator ─────────────────────────────────── */
+
+.ms-menu-item--current {
+    font-weight: 600;
+}
+
+/* ── Context menu expiry row ─────────────────────────────────────────────── */
+
+.ms-menu-expiry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+}
+
+.ms-menu-expiry-label {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Stretch the chip to fill remaining space in the expiry row */
+.ms-menu-expiry-row .smd-expiry-chip-wrap {
+    flex: 1;
+    min-width: 0;
+}

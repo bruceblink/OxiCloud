@@ -723,7 +723,9 @@
         "modifiedAt": "Data modyfikacji",
         "createdAt": "Data utworzenia",
         "size": "Rozmiar",
-        "favoriteDate": "Data dodania do ulubionych"
+        "favoriteDate": "Data dodania do ulubionych",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "Dzisiaj",

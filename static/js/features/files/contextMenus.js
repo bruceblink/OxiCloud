@@ -489,24 +489,20 @@ const contextMenus = {
                 return;
             }
 
-            // Use the contents endpoint to get children
-            const url = `/api/folders/${effectiveParentId}/contents`;
-
-            console.log('[Move Dialog] Loading folders from:', url, 'effectiveParentId:', effectiveParentId);
-            const response = await fetch(url, { credentials: 'same-origin' });
-            if (!response.ok) {
-                console.error('Failed to load folders:', response.status);
-                return;
-            }
-
-            const data = await response.json();
-            console.log('[Move Dialog] API response:', data);
-
-            // The contents endpoint returns an array of child folders
-            // The fallback /api/folders returns root folders (home folder itself)
             /** @type {FolderItem[]} */
-            const folders = Array.isArray(data) ? data : data.folders || [];
-            console.log('[Move Dialog] Loaded folders:', folders.length, 'folders:', folders);
+            const folders = [];
+            let cursor = /** @type {string|null} */ (null);
+            do {
+                const qs = cursor ? `resource_types=folder&cursor=${encodeURIComponent(cursor)}` : 'resource_types=folder';
+                const response = await fetch(`/api/folders/${effectiveParentId}/resources?${qs}`, { credentials: 'same-origin' });
+                if (!response.ok) {
+                    console.error('Failed to load folders:', response.status);
+                    return;
+                }
+                const data = await response.json();
+                folders.push(...(data.items || []));
+                cursor = data.next_cursor ?? null;
+            } while (cursor);
 
             const folderSelectContainer = document.getElementById('folder-select-container');
             const breadcrumbContainer = document.getElementById('move-dialog-breadcrumb');
@@ -719,7 +715,6 @@ const contextMenus = {
         app.moveDialogBreadcrumb = [];
         app.moveDialogCurrentFolderId = app.userHomeFolderId || null;
 
-        // Use loadMoveDialogFolders which uses /api/folders/{id}/contents
         await this.loadMoveDialogFolders(app.userHomeFolderId || null);
     },
 

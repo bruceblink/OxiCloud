@@ -723,7 +723,9 @@
         "modifiedAt": "Änderungsdatum",
         "createdAt": "Erstellungsdatum",
         "size": "Größe",
-        "favoriteDate": "Datum der Markierung"
+        "favoriteDate": "Datum der Markierung",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "Heute",

@@ -15,6 +15,7 @@
  */
 
 import { ResourceListComponent } from '../components/resourceList.js';
+import { shareModal } from '../components/shareModal.js';
 import { normalizeDateBucket, sizeBucket } from '../core/formatters.js';
 import { i18n } from '../core/i18n.js';
 import * as viewPrefs from '../core/viewPrefs.js';
@@ -217,6 +218,12 @@ function _ensureComponent() {
                     await favorites.addToFavorites(item.id, item.name, type, null);
                     _component?.setFavoriteVisualState(item.id, type, true);
                 }
+            },
+            onShareBadgeClick: (item) => {
+                const isFile = 'mime_type' in item;
+                shareModal.open(item, isFile ? 'file' : 'folder', () => {
+                    grants.fetchOutgoingGrants().then(() => refreshSharedBadges());
+                });
             },
             onContextMenu: (item, e) => ui.showContextMenuForItem(item, e),
             onSelectionChange: (selectedItems) => {
@@ -454,4 +461,12 @@ async function loadFiles(options = { insertHistory: true }) {
     }
 }
 
-export { addItem, filesView, loadFiles };
+/**
+ * Re-evaluate the shared badge for every item currently rendered in the Files list.
+ * Call this after the outgoing grants cache has been refreshed.
+ */
+function refreshSharedBadges() {
+    _component?.refreshSharedBadges();
+}
+
+export { addItem, filesView, loadFiles, refreshSharedBadges };

@@ -10,11 +10,12 @@ import { batchToolbar } from '../features/files/batchToolbar.js';
 import { favorites } from '../features/library/favorites.js';
 import { musicView } from '../features/library/music.js';
 import { photosView } from '../features/library/photos.js';
+import { grants } from '../model/grants.js';
 import { favoritesView } from '../views/favorites/favoritesView.js';
+import { mySharesView } from '../views/myShares/mySharesView.js';
 import { recentView } from '../views/recent/recentView.js';
-import { sharedView } from '../views/shared/sharedView.js';
 import { sharedWithMeView } from '../views/sharedWithMe/sharedWithMeView.js';
-import { filesView, loadFiles } from './filesView.js';
+import { filesView, loadFiles, refreshSharedBadges } from './filesView.js';
 import { setActionsBarMode, setGroupByView, syncGroupByMenu } from './main.js';
 import { app, appElements } from './state.js';
 import { loadTrashItems } from './trashView.js';
@@ -165,9 +166,9 @@ function setCurrentSection(section) {
         appElements.pageTitle.setAttribute('data-i18n', titleKey);
     }
 
-    // Hide sharedView when switching to any other section
-    if (section !== 'shared' && sharedView) {
-        sharedView.hide();
+    // Hide mySharesView when switching to any other section
+    if (section !== 'shared') {
+        mySharesView.hide();
     }
 
     // Hide "Load more" button when leaving the sharedwithme section
@@ -208,21 +209,27 @@ function switchToSharedSection() {
     const breadcrumb = document.querySelector('.breadcrumb');
     breadcrumb?.classList.add('hidden');
 
-    // Hide actions-bar for shared view
-    setActionsBarMode('hidden');
+    // Show actions-bar with group-by controls only (no grid/list toggle —
+    // MySharesList is always in list mode).
+    setActionsBarMode('shared');
 
-    //reset files view + remove any error
-    ui.resetFilesList();
+    // Populate the group-by dropdown with this section's dimensions.
+    setGroupByView(mySharesView);
+    syncGroupByMenu(mySharesView.groupByDefs);
 
-    // Hide file containers
-    toggleFileContainer(false);
+    // Restore the saved group-by selection in the dropdown.
+    const msPrefs = viewPrefs.load('shared');
+    applyGroupByMenuState(msPrefs.groupBy, msPrefs.reversed);
 
-    // Show shared view
-    sharedView.init().then(() => {
-        sharedView.show();
-    });
+    // Show the files container always in list view — grid is not applicable here.
+    toggleFileContainer(true);
+    app.currentView = 'list';
+    syncViewContainers();
 
     if (batchToolbar) batchToolbar.clear();
+
+    // Load and render items into the files container
+    mySharesView.init();
 }
 
 function switchToSharedWithMeSection() {
@@ -293,10 +300,13 @@ function switchToFilesSection() {
     ui.updateBreadcrumb();
     if (batchToolbar) batchToolbar.clear();
 
-    // temp solution
-    sharedView.loadItems().then(() => {
-        loadFiles();
-    });
+    loadFiles();
+
+    // Refresh outgoing grants in the background and repaint badges once done.
+    // Badges are rendered synchronously from the in-memory cache, so any staleness
+    // from navigating away and back (or starting on a different section) is corrected
+    // without blocking the file list render.
+    grants.fetchOutgoingGrants().then(() => refreshSharedBadges());
 }
 
 function switchToFavoritesSection() {

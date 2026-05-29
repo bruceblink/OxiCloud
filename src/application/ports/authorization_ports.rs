@@ -12,7 +12,8 @@ use uuid::Uuid;
 
 use crate::common::errors::DomainError;
 use crate::domain::services::authorization::{
-    Grant, GrantCursor, IncomingGrantSummary, Permission, Resource, ResourceKind, Subject,
+    Grant, GrantCursor, IncomingGrantSummary, OutgoingResourceSummary, Permission, Resource,
+    ResourceKind, Subject,
 };
 
 pub trait AuthorizationEngine: Send + Sync + 'static {
@@ -97,15 +98,50 @@ pub trait AuthorizationEngine: Send + Sync + 'static {
     /// `GET /api/grants/outgoing` ("things I've shared with others").
     async fn list_outgoing_grants(&self, granted_by: Uuid) -> Result<Vec<Grant>, DomainError>;
 
+    /// Cursor-paginated list of resources that `granted_by` has shared with
+    /// others. Multiple permission rows for the same (subject, resource) pair
+    /// are collapsed into one `OutgoingGrantEntry`; multiple subjects on the
+    /// same resource are grouped into one `OutgoingResourceSummary`.
+    ///
+    /// Returns `(summaries, next_cursor)`.
+    async fn list_outgoing_resources_paged(
+        &self,
+        granted_by: Uuid,
+        limit: u32,
+        cursor: Option<GrantCursor>,
+        sort_by: &str,
+        reverse: bool,
+    ) -> Result<(Vec<OutgoingResourceSummary>, Option<GrantCursor>), DomainError>;
+
     /// Create a grant. Idempotent — duplicates are absorbed by the UNIQUE
-    /// constraint and the existing row is returned.
+    /// constraint; if the row already exists its `expires_at` is updated.
     async fn grant(
         &self,
         granted_by: Uuid,
         subject: Subject,
         permission: Permission,
         resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Grant, DomainError>;
+
+    /// Update `expires_at` on every grant row for the given subject.
+    /// Used when a share's expiry is changed — one call updates all
+    /// permission rows for that token in a single UPDATE.
+    async fn set_expiry_for_subject(
+        &self,
+        subject: Subject,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError>;
+
+    /// Update `expires_at` on every grant row for the given `(subject, resource)`
+    /// pair. Used by `set_role` to sync the expiry of retained grants when the
+    /// caller changes expiry without changing permissions.
+    async fn set_expiry_on_resource(
+        &self,
+        subject: Subject,
+        resource: Resource,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DomainError>;
 
     /// Revoke a specific grant by its UUID. Returns `Ok(())` whether or not
     /// the row existed (idempotent revoke).

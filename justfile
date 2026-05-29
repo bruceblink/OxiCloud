@@ -8,6 +8,8 @@ build:
 
 release:
     cargo build --release
+    # check that app is clean
+    node --check static-dist/js/app.*.js
 
 run:
     cargo run

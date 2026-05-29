@@ -723,7 +723,9 @@
         "modifiedAt": "更新日",
         "createdAt": "作成日",
         "size": "サイズ",
-        "favoriteDate": "お気に入り登録日"
+        "favoriteDate": "お気に入り登録日",
+        "byFiles": "By files",
+        "sharedWith": "Shared with"
     },
     "dateBucket": {
         "today": "今日",
