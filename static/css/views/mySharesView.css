@@ -287,7 +287,9 @@
     cursor: pointer;
     font-size: 11px;
     flex-shrink: 0;
-    transition: background 0.12s, color 0.12s;
+    transition:
+        background 0.12s,
+        color 0.12s;
 }
 
 .ms-btn-icon:hover {
