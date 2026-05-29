@@ -136,7 +136,11 @@ const mySharesView = {
                         }
                     },
                     onShareEdit: (resource, resourceType) => {
-                        shareModal.open(resource, /** @type {'file'|'folder'} */ (resourceType));
+                        shareModal.open(resource, /** @type {'file'|'folder'} */ (resourceType), () => {
+                            this._nextCursor = null;
+                            this._component?.clear();
+                            this._loadPage();
+                        });
                     }
                 });
             }

@@ -107,16 +107,21 @@ const shareModal = {
     /** @type {HTMLElement|null} — body node injected into Modal */
     _bodyEl: null,
 
+    /** @type {(() => void)|null} — called after changes are successfully committed */
+    _onApplied: null,
+
     // ── Public API ─────────────────────────────────────────────────────────────
 
     /**
      * Open the share modal for a file or folder.
      * @param {FileItem|FolderItem} item
      * @param {'file'|'folder'}     itemType
+     * @param {(() => void)=}       onApplied - called after changes are successfully committed
      */
-    async open(item, itemType) {
+    async open(item, itemType, onApplied) {
         this._item = item;
         this._itemType = itemType;
+        this._onApplied = onApplied ?? null;
         this._localMembers = [];
         this._localLinks = [];
         this._newLinks = [];
@@ -888,6 +893,7 @@ const shareModal = {
             ui.setSharedVisualState(item.id, itemType, hasAnyShare);
 
             Modal.close(true);
+            this._onApplied?.();
         } catch (err) {
             console.error('shareModal._applyAll error:', err);
             if (Modal.confirmBtn) Modal.confirmBtn.disabled = false;
