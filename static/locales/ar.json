@@ -131,7 +131,8 @@
             "light": "فاتح",
             "dark": "داكن",
             "auto": "مثل النظام"
-        }
+        },
+        "manage_groups": "إدارة المجموعات"
     },
     "share": {
         "dialogTitle": "رابط المشاركة",
@@ -336,7 +337,13 @@
         "move_error": "خطأ في النقل",
         "empty_name": "لا يمكن أن يكون الاسم فارغاً",
         "name_exists": "ملف أو مجلد بهذا الاسم موجود بالفعل",
-        "generic_error": "حدث خطأ"
+        "generic_error": "حدث خطأ",
+        "group_name_invalid": "يجب أن يتطابق اسم المجموعة مع صيغة بادئة البريد الإلكتروني (حروف، أرقام، نقطة، شرطة، شرطة سفلية؛ 1–64 حرفًا).",
+        "group_cycle": "سينشئ هذا العضو مرجعًا دائريًا بين المجموعات.",
+        "group_depth_exceeded": "تتجاوز عمق التعشيش الحد الأقصى المسموح (8).",
+        "group_virtual_immutable": "مجموعة «Internal» تدار من قبل النظام ولا يمكن تعديلها.",
+        "group_not_found": "المجموعة غير موجودة.",
+        "group_name_taken": "توجد بالفعل مجموعة بهذا الاسم."
     },
     "breadcrumb": {
         "home": "الرئيسية"
@@ -755,5 +762,31 @@
         "today": "اليوم",
         "last7days": "آخر 7 أيام",
         "last30days": "آخر 30 يومًا"
+    },
+    "groups": {
+        "title": "إدارة المجموعات",
+        "create_button": "إنشاء مجموعة",
+        "create_dialog_title": "مجموعة جديدة",
+        "edit_dialog_title": "إعادة تسمية المجموعة",
+        "name_label": "الاسم",
+        "name_placeholder": "engineering",
+        "description_label": "الوصف (اختياري)",
+        "members_section": "الأعضاء",
+        "add_member_placeholder": "إضافة مستخدم أو مجموعة…",
+        "no_members": "لا يوجد أعضاء بعد.",
+        "remove_member": "إزالة",
+        "delete_group": "حذف المجموعة",
+        "delete_confirm": "حذف المجموعة \"{name}\"؟ سيتم إلغاء الصلاحيات المرتبطة بهذه المجموعة.",
+        "empty_state": "لا توجد مجموعات بعد.",
+        "load_more": "تحميل المزيد",
+        "back_to_list": "رجوع",
+        "loading": "جارٍ التحميل…",
+        "virtual_badge": "النظام",
+        "member_count_zero": "لا يوجد أعضاء",
+        "member_count_one": "عضو واحد",
+        "member_count_other": "{count} أعضاء",
+        "delete_confirm_label": "اكتب اسم المجموعة للتأكيد:",
+        "delete_confirm_mismatch": "اكتب اسم المجموعة كما هو للتأكيد.",
+        "virtual_internal_name": "داخلي"
     }
 }

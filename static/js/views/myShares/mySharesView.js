@@ -12,12 +12,13 @@
  */
 
 import { ui } from '../../app/ui.js';
-import { MySharesList } from '../../components/mySharesList.js';
+import { collectGroupSubjectIds, MySharesList } from '../../components/mySharesList.js';
 import { shareModal } from '../../components/shareModal.js';
 import { i18n } from '../../core/i18n.js';
 import * as viewPrefs from '../../core/viewPrefs.js';
 import * as itemTooltip from '../../features/itemTooltip.js';
 import { grants } from '../../model/grants.js';
+import { groups } from '../../model/groups.js';
 
 /** @import {FileItem, FolderItem} from '../../core/types.js' */
 
@@ -68,6 +69,14 @@ const mySharesView = {
 
     /** @type {MySharesList|null} */
     _component: null,
+
+    /**
+     * Cumulative id→GroupItem map of every group subject seen so far in this
+     * session. Each `_loadPage()` merges newly resolved entries so subsequent
+     * pages don't re-resolve already-known groups.
+     * @type {Record<string, import('../../core/types.js').GroupItem>}
+     */
+    _knownGroupMeta: {},
 
     /** @type {string} */
     _groupBy: '',
@@ -186,6 +195,24 @@ const mySharesView = {
                 `);
                 this._setLoadMoreVisible(false);
                 return;
+            }
+
+            // Resolve full GroupItem records for any group-subject grants on
+            // this page so lane headers and identity rows render the localised
+            // name + virtual-aware icon. Cheap — one search call shared across
+            // every group visible on the page.
+            if (this._component) {
+                const groupIds = collectGroupSubjectIds(data.items);
+                if (groupIds.size > 0) {
+                    try {
+                        const resolved = await groups.resolveGroups(groupIds);
+                        const merged = { ...this._knownGroupMeta, ...resolved };
+                        this._component.setGroupMeta(merged);
+                        this._knownGroupMeta = merged;
+                    } catch (err) {
+                        console.warn('mySharesView: failed to resolve group names', err);
+                    }
+                }
             }
 
             if (isFirstPage) {

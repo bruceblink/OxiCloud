@@ -338,15 +338,20 @@
 
 /**
  * One (subject, permissions) entry within an outgoing resource item.
+ * Mirrors the server's `OutgoingResourceGrantDto`. `subject_type` is the
+ * full set the backend may emit; the UI for My Shares filters out `'group'`
+ * before rendering (see `_excludeGroupGrants` in mySharesList.js) so only
+ * `'user'` and `'token'` rows actually reach the view layer there.
+ *
  * @typedef {Object} OutgoingResourceGrant
- * @property {string}                    grant_id
- * @property {'user'|'token'}            subject_type
- * @property {string}                    subject_id
- * @property {string}                    subject_display - Username (users) or share name (tokens).
- * @property {'viewer'|'editor'|'admin'} role
- * @property {string}                    granted_at   - ISO-8601
- * @property {string|null}               [expires_at] - ISO-8601 or absent.
- * @property {boolean}                   has_password - True when a token subject has a password set.
+ * @property {string}                              grant_id
+ * @property {'user'|'group'|'token'|'external'}   subject_type
+ * @property {string}                              subject_id
+ * @property {string}                              subject_display - Username (users) or share name (tokens).
+ * @property {'viewer'|'editor'|'admin'}           role
+ * @property {string}                              granted_at   - ISO-8601
+ * @property {string|null}                         [expires_at] - ISO-8601 or absent.
+ * @property {boolean}                             has_password - True when a token subject has a password set.
  */
 
 /**
@@ -406,6 +411,8 @@
  * @property {string}          created_at      - ISO-8601
  * @property {string}          updated_at      - ISO-8601
  * @property {string}          etag
+ * @property {'user'|'group'}  [_kind]         - Discriminator added by the share-modal autocomplete when merging contacts with ReBAC subject groups. Absent (or 'user') for plain contacts; 'group' indicates the row is a subject-group suggestion with a `name` field instead of contact details.
+ * @property {string}          [name]          - Present only when `_kind === 'group'` — the subject-group's display name.
  */
 
 /**
@@ -438,6 +445,8 @@
  * @property {ShareRoleEnum} role    - Derived role label shown in the UI.
  * @property {'keep'|'remove'|'change'|'new'} _op - Pending local operation.
  * @property {string|null}  [expires_at]  - YYYY-MM-DD expiry date string, or null for no expiry.
+ * @property {string}       [_displayName] - Optional human-readable label (set for group subjects so the row can show the group name; user subjects resolve their name via `createUserVignette`).
+ * @property {boolean}      [_isVirtual]  - True when this row's subject is a virtual (system-managed) group, so the vignette renders with the virtual-group icon.
  */
 
 /**
@@ -454,5 +463,34 @@
  * @property {string}      name
  * @property {string|null} password
  * @property {string|null} expires_at  - ISO-8601 date string or null.
+ */
+
+// ------------------- ReBAC subject groups
+
+/**
+ * Mirrors `GroupDto` on the server (`subject_group_handler.rs::GroupDto`).
+ * @typedef {Object} GroupItem
+ * @property {string}        id
+ * @property {string}        name
+ * @property {string|null}   [description]
+ * @property {boolean}       is_virtual
+ * @property {string}        created_at   - ISO-8601
+ * @property {string}        updated_at   - ISO-8601
+ * @property {boolean}       can_manage   - True if the current caller may rename / delete / curate the membership.
+ * @property {number}        member_count - Direct-member count (users + nested groups, one level). The
+ *                                          `/groups/search` endpoint emits 0 to skip a per-row COUNT(*);
+ *                                          list/get/create/update return the real value.
+ */
+
+/**
+ * Response from `GET /api/groups` — paginated list of groups.
+ * @typedef {Object} GroupListResponse
+ * @property {GroupItem[]} items
+ * @property {number}      total
+ */
+
+/**
+ * One direct member of a group (tagged union: user or nested group).
+ * @typedef {{kind: 'user', id: string} | {kind: 'group', id: string}} GroupMemberItem
  */
 

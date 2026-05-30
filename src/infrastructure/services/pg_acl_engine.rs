@@ -28,24 +28,49 @@
 //!   DB transaction with the resource table need an explicit signal to
 //!   delete their tuples.
 
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 use uuid::Uuid;
 
+use moka::future::Cache;
 use sqlx::PgPool;
 
 use crate::application::ports::authorization_ports::AuthorizationEngine;
 use crate::common::errors::DomainError;
+use crate::domain::entities::subject_group::INTERNAL_GROUP_ID;
+use crate::domain::repositories::subject_group_repository::SubjectGroupRepository;
 use crate::domain::services::authorization::{
     Grant, GrantCursor, IncomingGrantSummary, OutgoingGrantEntry, OutgoingResourceSummary,
     Permission, Resource, ResourceKind, Subject,
 };
+use crate::infrastructure::repositories::pg::SubjectGroupPgRepository;
 use crate::infrastructure::repositories::pg::file_blob_read_repository::FileBlobReadRepository;
 use crate::infrastructure::repositories::pg::folder_db_repository::FolderDbRepository;
+
+/// Per-call counters surfaced through `tracing::debug!` for performance
+/// observability: cache hit-rate, SQL traffic, transitive expansion size.
+///
+/// Sub-microsecond cost when debug logging is off (one atomic write per
+/// increment, no allocation, no formatting).
+#[derive(Default)]
+struct QueryCounters {
+    cache_hit: AtomicU32,
+    sql_queries: AtomicU32,
+    expanded_groups: AtomicU32,
+}
 
 pub struct PgAclEngine {
     pool: Arc<PgPool>,
     folder_repo: Arc<FolderDbRepository>,
     file_repo: Arc<FileBlobReadRepository>,
+    /// Group repository — `None` only in test stubs that don't exercise authz.
+    group_repo: Option<Arc<SubjectGroupPgRepository>>,
+    /// Memoise `user_id → transitive group set` for 30 s. Bounded to 50 000
+    /// entries; eviction is LRU + TTL. Stale by up to TTL after a membership
+    /// change — acceptable trade-off (see plan, "Cache TTL behaviour").
+    user_groups_cache: Cache<Uuid, Arc<HashSet<Uuid>>>,
 }
 
 impl PgAclEngine {
@@ -53,11 +78,17 @@ impl PgAclEngine {
         pool: Arc<PgPool>,
         folder_repo: Arc<FolderDbRepository>,
         file_repo: Arc<FileBlobReadRepository>,
+        group_repo: Arc<SubjectGroupPgRepository>,
     ) -> Self {
         Self {
             pool,
             folder_repo,
             file_repo,
+            group_repo: Some(group_repo),
+            user_groups_cache: Cache::builder()
+                .max_capacity(50_000)
+                .time_to_live(Duration::from_secs(30))
+                .build(),
         }
     }
 
@@ -75,6 +106,79 @@ impl PgAclEngine {
             pool: Arc::new(pool),
             folder_repo: Arc::new(FolderDbRepository::new_stub()),
             file_repo: Arc::new(FileBlobReadRepository::new_stub()),
+            group_repo: None,
+            user_groups_cache: Cache::builder()
+                .max_capacity(1)
+                .time_to_live(Duration::from_secs(1))
+                .build(),
+        }
+    }
+
+    /// Expand a user subject into the set of subject UUIDs that should match
+    /// in `access_grants`: the user's own UUID, every group the user is
+    /// transitively a member of, and the implicit `INTERNAL_GROUP_ID`.
+    ///
+    /// This is the **only** place transitive membership is walked. A future
+    /// closure-table swap-in (Option 3 in the design doc) replaces just the
+    /// `repo.groups_for_user` call below — every caller stays unchanged.
+    async fn expand_user(
+        &self,
+        user_id: Uuid,
+        counters: &QueryCounters,
+    ) -> Result<Arc<HashSet<Uuid>>, DomainError> {
+        if let Some(cached) = self.user_groups_cache.get(&user_id).await {
+            counters.cache_hit.store(1, Ordering::Relaxed);
+            counters
+                .expanded_groups
+                .store(cached.len() as u32, Ordering::Relaxed);
+            return Ok(cached);
+        }
+
+        let mut set: HashSet<Uuid> = HashSet::new();
+        set.insert(user_id);
+        // The Internal virtual group: implicit membership for every
+        // authenticated user. Once the external-users work lands this will
+        // narrow to `if !user.is_external { ... }`.
+        set.insert(INTERNAL_GROUP_ID);
+
+        if let Some(repo) = &self.group_repo {
+            counters.sql_queries.fetch_add(1, Ordering::Relaxed);
+            let direct = repo.groups_for_user(user_id).await.map_err(|e| {
+                DomainError::internal_error("PgAcl", format!("groups_for_user: {e}"))
+            })?;
+            set.extend(direct);
+        }
+
+        counters
+            .expanded_groups
+            .store(set.len() as u32, Ordering::Relaxed);
+        let arc = Arc::new(set);
+        self.user_groups_cache.insert(user_id, arc.clone()).await;
+        Ok(arc)
+    }
+
+    /// Expand a caller's `Subject` into the `(subject_types, subject_ids)`
+    /// pair that should be matched in `storage.access_grants`. For User
+    /// callers this is `(["user","group"], [uid, …transitive groups, INTERNAL])`;
+    /// for any non-user subject (Token / External / Group as direct caller)
+    /// it's a single-element pair with no cascade.
+    ///
+    /// Shared by `check_inner` (permission decision) and the
+    /// `list_incoming_*` queries ("Shared with me") so that any folder/file
+    /// the user can `read` via a group grant also appears in their incoming
+    /// listing. Shares the `expand_user` Moka cache, so the listing call
+    /// right after a permission check is a cache hit.
+    async fn subject_match_set(
+        &self,
+        subject: Subject,
+        counters: &QueryCounters,
+    ) -> Result<(Vec<&'static str>, Vec<Uuid>), DomainError> {
+        match subject {
+            Subject::User(uid) => {
+                let expanded = self.expand_user(uid, counters).await?;
+                Ok((vec!["user", "group"], expanded.iter().copied().collect()))
+            }
+            _ => Ok((vec![subject.type_str()], vec![subject.id()])),
         }
     }
 
@@ -87,21 +191,32 @@ impl PgAclEngine {
     }
 
     /// Cascading check for folders: is there a grant on any ancestor folder
-    /// (including the target itself) in this subject + permission?
-    /// Uses GiST index on `storage.folders.lpath`.
+    /// (including the target itself) for any of the given subject IDs and
+    /// any of the given subject types?
+    ///
+    /// `subject_types` is `["user", "group"]` when the caller is a User
+    /// (so we match both their own grants and their group-mediated grants),
+    /// or a single-element slice for Token / External / Group-direct callers.
+    /// `subject_ids` is the expanded set returned by `expand_user` (or a
+    /// single-element vec for non-user callers).
+    ///
+    /// Uses the GiST index on `storage.folders.lpath` for O(log N) cascade.
     async fn folder_cascade_grant_exists(
         &self,
-        subject: Subject,
+        subject_types: &[&str],
+        subject_ids: &[Uuid],
         permission: Permission,
         folder_id: Uuid,
+        counters: &QueryCounters,
     ) -> Result<bool, DomainError> {
+        counters.sql_queries.fetch_add(1, Ordering::Relaxed);
         let exists: Option<i32> = sqlx::query_scalar(
             r#"
             SELECT 1
               FROM storage.access_grants g
               JOIN storage.folders gf ON gf.id = g.resource_id
-             WHERE g.subject_type  = $1
-               AND g.subject_id    = $2
+             WHERE g.subject_type  = ANY($1)
+               AND g.subject_id    = ANY($2)
                AND g.permission    = $3
                AND g.resource_type = 'folder'
                AND (g.expires_at IS NULL OR g.expires_at > NOW())
@@ -109,8 +224,8 @@ impl PgAclEngine {
              LIMIT 1
             "#,
         )
-        .bind(subject.type_str())
-        .bind(subject.id())
+        .bind(subject_types)
+        .bind(subject_ids)
         .bind(permission.as_str())
         .bind(folder_id)
         .fetch_optional(self.pool.as_ref())
@@ -121,13 +236,18 @@ impl PgAclEngine {
     }
 
     /// Cascading check for files: either a direct file grant OR a grant on
-    /// any ancestor folder of the file's containing folder.
+    /// any ancestor folder of the file's containing folder. See
+    /// `folder_cascade_grant_exists` for the meaning of `subject_types` /
+    /// `subject_ids`.
     async fn file_cascade_grant_exists(
         &self,
-        subject: Subject,
+        subject_types: &[&str],
+        subject_ids: &[Uuid],
         permission: Permission,
         file_id: Uuid,
+        counters: &QueryCounters,
     ) -> Result<bool, DomainError> {
+        counters.sql_queries.fetch_add(1, Ordering::Relaxed);
         let exists: Option<i32> = sqlx::query_scalar(
             r#"
             SELECT 1
@@ -135,7 +255,9 @@ impl PgAclEngine {
                 -- direct file grant
                 SELECT 1
                   FROM storage.access_grants
-                 WHERE subject_type = $1 AND subject_id = $2 AND permission = $3
+                 WHERE subject_type = ANY($1)
+                   AND subject_id   = ANY($2)
+                   AND permission   = $3
                    AND resource_type = 'file' AND resource_id = $4
                    AND (expires_at IS NULL OR expires_at > NOW())
                 UNION ALL
@@ -144,8 +266,8 @@ impl PgAclEngine {
                   FROM storage.access_grants g
                   JOIN storage.folders gf     ON gf.id = g.resource_id
                   JOIN storage.files target_f ON target_f.id = $4
-                 WHERE g.subject_type  = $1
-                   AND g.subject_id    = $2
+                 WHERE g.subject_type  = ANY($1)
+                   AND g.subject_id    = ANY($2)
                    AND g.permission    = $3
                    AND g.resource_type = 'folder'
                    AND (g.expires_at IS NULL OR g.expires_at > NOW())
@@ -156,8 +278,8 @@ impl PgAclEngine {
              LIMIT 1
             "#,
         )
-        .bind(subject.type_str())
-        .bind(subject.id())
+        .bind(subject_types)
+        .bind(subject_ids)
         .bind(permission.as_str())
         .bind(file_id)
         .fetch_optional(self.pool.as_ref())
@@ -222,18 +344,20 @@ impl PgAclEngine {
             expires_at: row.8,
         })
     }
-}
 
-impl AuthorizationEngine for PgAclEngine {
-    async fn check(
+    /// The actual permission decision. Wrapped by `check()` which adds
+    /// per-call instrumentation.
+    async fn check_inner(
         &self,
         subject: Subject,
         permission: Permission,
         resource: Resource,
+        counters: &QueryCounters,
     ) -> Result<bool, DomainError> {
         // Owner short-circuit (only for User subjects — groups/tokens/external
         // are never owners of resources).
         if let Subject::User(uid) = subject {
+            counters.sql_queries.fetch_add(1, Ordering::Relaxed);
             match self.owner_of(resource).await {
                 Ok(owner) if owner == uid => return Ok(true),
                 Ok(_) => { /* not owner — fall through to grants */ }
@@ -247,17 +371,66 @@ impl AuthorizationEngine for PgAclEngine {
             }
         }
 
-        // Cascading grant check.
+        // Expand the subject so group-mediated grants apply when the caller
+        // is a User. See `subject_match_set` for the shared shape used by
+        // both the cascade check and the "shared with me" listing queries.
+        let (subject_types, subject_ids) = self.subject_match_set(subject, counters).await?;
+
         match resource {
             Resource::Folder(id) => {
-                self.folder_cascade_grant_exists(subject, permission, id)
-                    .await
+                self.folder_cascade_grant_exists(
+                    &subject_types,
+                    &subject_ids,
+                    permission,
+                    id,
+                    counters,
+                )
+                .await
             }
             Resource::File(id) => {
-                self.file_cascade_grant_exists(subject, permission, id)
-                    .await
+                self.file_cascade_grant_exists(
+                    &subject_types,
+                    &subject_ids,
+                    permission,
+                    id,
+                    counters,
+                )
+                .await
             }
         }
+    }
+}
+
+impl AuthorizationEngine for PgAclEngine {
+    async fn check(
+        &self,
+        subject: Subject,
+        permission: Permission,
+        resource: Resource,
+    ) -> Result<bool, DomainError> {
+        let start = std::time::Instant::now();
+        let counters = QueryCounters::default();
+
+        let result = self
+            .check_inner(subject, permission, resource, &counters)
+            .await;
+
+        // Single structured debug line per check. No-op when subscriber
+        // filter is at INFO or above. See plan, "Debug instrumentation".
+        tracing::debug!(
+            target: "oxicloud::authz",
+            event = "authz.check",
+            subject = %subject,
+            permission = %permission,
+            resource = %resource,
+            allowed = result.as_ref().copied().unwrap_or(false),
+            duration_us = start.elapsed().as_micros() as u64,
+            cache_hit = counters.cache_hit.load(Ordering::Relaxed) > 0,
+            sql_queries = counters.sql_queries.load(Ordering::Relaxed),
+            expanded_groups = counters.expanded_groups.load(Ordering::Relaxed),
+        );
+
+        result
     }
 
     async fn list_incoming_grants(
@@ -266,6 +439,8 @@ impl AuthorizationEngine for PgAclEngine {
         permission_filter: Option<Permission>,
     ) -> Result<Vec<Grant>, DomainError> {
         let perm_str = permission_filter.map(|p| p.as_str().to_string());
+        let counters = QueryCounters::default();
+        let (subject_types, subject_ids) = self.subject_match_set(subject, &counters).await?;
 
         let rows = sqlx::query_as::<
             _,
@@ -285,14 +460,14 @@ impl AuthorizationEngine for PgAclEngine {
             SELECT id, subject_type, subject_id, resource_type, resource_id,
                    permission, granted_by, granted_at, expires_at
               FROM storage.access_grants
-             WHERE subject_type = $1
-               AND subject_id   = $2
+             WHERE subject_type = ANY($1)
+               AND subject_id   = ANY($2)
                AND ($3::text IS NULL OR permission = $3)
              ORDER BY granted_at DESC
             "#,
         )
-        .bind(subject.type_str())
-        .bind(subject.id())
+        .bind(&subject_types)
+        .bind(&subject_ids)
         .bind(perm_str)
         .fetch_all(self.pool.as_ref())
         .await
@@ -350,6 +525,10 @@ impl AuthorizationEngine for PgAclEngine {
         let cursor_id = cursor.as_ref().map(|c| c.resource_id);
 
         // ── agg CTE (identical in all branches) ───────────────────────────────
+        // `subject_type`/`subject_id` are arrays here: for a User caller this
+        // is `(["user","group"], [uid, …transitive groups, INTERNAL])` so the
+        // listing includes every resource the user can reach via a group
+        // grant (matching what `check()` allows). See `subject_match_set`.
         const AGG: &str = r#"agg AS (
             SELECT
                 resource_type,
@@ -358,8 +537,8 @@ impl AuthorizationEngine for PgAclEngine {
                 MIN(granted_at)                                    AS granted_at,
                 (array_agg(granted_by ORDER BY granted_at))[1]    AS granted_by
             FROM storage.access_grants
-            WHERE subject_type = $1
-              AND subject_id   = $2
+            WHERE subject_type = ANY($1)
+              AND subject_id   = ANY($2)
               AND ($3::text[] IS NULL OR resource_type = ANY($3))
             GROUP BY resource_type, resource_id
         )"#;
@@ -501,10 +680,15 @@ impl AuthorizationEngine for PgAclEngine {
             }
         };
 
+        // Expand the caller so group-mediated grants surface in the listing,
+        // mirroring `check()`. Shares the Moka cache (`expand_user`).
+        let counters = QueryCounters::default();
+        let (subject_types, subject_ids) = self.subject_match_set(subject, &counters).await?;
+
         // ── Execute — uniform 8 binds for every sort mode ─────────────────────
         let mut rows: Vec<Row> = sqlx::query_as::<_, Row>(&sql)
-            .bind(subject.type_str()) // $1
-            .bind(subject.id()) // $2
+            .bind(&subject_types) // $1
+            .bind(&subject_ids) // $2
             .bind(&kind_strs) // $3
             .bind(&cursor_str) // $4 sort_str cursor
             .bind(cursor_int) // $5 sort_int cursor
@@ -740,7 +924,7 @@ impl AuthorizationEngine for PgAclEngine {
                     )
                     SELECT ag.resource_type, ag.resource_id, rp.first_shared_at,
                            ag.subject_type, ag.subject_id,
-                           COALESCE(u.username, sh.item_name, fi.name, fld.name, ag.subject_id::text) AS subject_display,
+                           COALESCE(u.username, sg.name::text, sh.item_name, fi.name, fld.name, ag.subject_id::text) AS subject_display,
                            ag.id AS grant_id, ag.granted_at, ag.expires_at, ag.permission,
                            rp.sort_str, rp.sort_int,
                            (sh.password_hash IS NOT NULL) AS has_password
@@ -749,17 +933,34 @@ impl AuthorizationEngine for PgAclEngine {
                       ON ag.resource_type = rp.resource_type AND ag.resource_id = rp.resource_id
                      AND ag.granted_by = $1
                     LEFT JOIN auth.users u   ON ag.subject_type = 'user'  AND u.id   = ag.subject_id
+                    LEFT JOIN auth.subject_groups sg ON ag.subject_type = 'group' AND sg.id = ag.subject_id
                     LEFT JOIN storage.shares sh  ON ag.subject_type = 'token' AND sh.id  = ag.subject_id
                     LEFT JOIN storage.files fi   ON ag.subject_type = 'token' AND ag.resource_type = 'file'   AND fi.id  = ag.resource_id
                     LEFT JOIN storage.folders fld ON ag.subject_type = 'token' AND ag.resource_type = 'folder' AND fld.id = ag.resource_id
-                    ORDER BY {page_order}, ag.subject_id, ag.granted_at"#
+                    -- Per-resource grant ordering: groups → users → password-protected
+                    -- links → public links (matches the "Shared with" subject sort).
+                    -- Resource ordering comes from {page_order}; the CASE only
+                    -- breaks ties within one resource.
+                    ORDER BY {page_order},
+                             CASE
+                                 WHEN ag.subject_type = 'group' THEN 0
+                                 WHEN ag.subject_type = 'user' THEN 1
+                                 WHEN ag.subject_type = 'token' AND sh.password_hash IS NOT NULL THEN 2
+                                 ELSE 3
+                             END ASC,
+                             LOWER(COALESCE(u.username, sg.name::text, sh.item_name, ag.subject_id::text)) ASC,
+                             ag.granted_at"#
                 )
             }
             "subject" => {
                 // Page on (subject_type_order, subject_display, resource_id) triples so
                 // every swimlane is always contiguous across cursor pages.
                 //
-                // subject_type_order: 0 = user, 1 = token without password, 2 = token with password
+                // subject_type_order: 0 = group, 1 = user, 2 = token with password,
+                //                     3 = token without password
+                // — picked so the My Shares "Shared with" view naturally renders the
+                // higher-trust principals (groups, then named users) above the
+                // lower-trust ones (anonymous link tokens).
                 //
                 // Cursor encodes: sort_int = subject_type_order, resource_name = LOWER(subject_display),
                 // resource_id = last resource_id.
@@ -787,17 +988,20 @@ impl AuthorizationEngine for PgAclEngine {
                             ag.resource_id,
                             ag.subject_type,
                             ag.subject_id,
-                            MAX(COALESCE(u.username, sh.item_name, ag.subject_id::text)) AS subject_display,
+                            MAX(COALESCE(u.username, sg.name::text, sh.item_name, ag.subject_id::text)) AS subject_display,
                             BOOL_OR(sh.password_hash IS NOT NULL) AS has_password,
                             MAX(CASE
-                                WHEN ag.subject_type = 'user' THEN 0
-                                WHEN ag.subject_type = 'token' AND sh.password_hash IS NULL THEN 1
-                                ELSE 2
+                                WHEN ag.subject_type = 'group' THEN 0
+                                WHEN ag.subject_type = 'user' THEN 1
+                                WHEN ag.subject_type = 'token' AND sh.password_hash IS NOT NULL THEN 2
+                                ELSE 3
                             END)::bigint AS sort_int,
                             MIN(ag.granted_at) AS first_granted_at
                         FROM storage.access_grants ag
                         LEFT JOIN auth.users u
                                ON ag.subject_type = 'user' AND u.id = ag.subject_id
+                        LEFT JOIN auth.subject_groups sg
+                               ON ag.subject_type = 'group' AND sg.id = ag.subject_id
                         LEFT JOIN storage.shares sh
                                ON ag.subject_type = 'token' AND sh.id = ag.subject_id
                         LEFT JOIN storage.files fi

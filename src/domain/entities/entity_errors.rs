@@ -195,6 +195,52 @@ impl Error for CalendarEventError {}
 pub type CalendarEventResult<T> = Result<T, CalendarEventError>;
 
 // ============================================================================
+// SUBJECT GROUP ERRORS
+// ============================================================================
+
+/// Errors that can occur during SubjectGroup entity operations.
+///
+/// Subject groups are ReBAC authorization principals: root-owned, named with
+/// RFC 5321 local-part shape (so they may later be addressed as email locals),
+/// and able to nest (a group can contain other groups, with cycle detection
+/// at write time at the application layer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubjectGroupError {
+    /// Name doesn't match the RFC 5321 local-part shape (alnum start, then
+    /// alnum/dot/dash/underscore, max 64 chars).
+    InvalidName(String),
+    /// Cycle detected — the proposed membership would create a loop in the
+    /// group-of-groups graph.
+    CycleDetected(String),
+    /// Adding this member would exceed the maximum nesting depth.
+    DepthExceeded(String),
+    /// Attempt to mutate (delete, rename, or change membership of) an
+    /// immutable virtual group such as `Internal`.
+    VirtualImmutable(String),
+    /// General validation error.
+    ValidationError(String),
+}
+
+impl Display for SubjectGroupError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            SubjectGroupError::InvalidName(msg) => write!(f, "Invalid group name: {}", msg),
+            SubjectGroupError::CycleDetected(msg) => write!(f, "Cycle detected: {}", msg),
+            SubjectGroupError::DepthExceeded(msg) => write!(f, "Group depth exceeded: {}", msg),
+            SubjectGroupError::VirtualImmutable(msg) => {
+                write!(f, "Virtual group is immutable: {}", msg)
+            }
+            SubjectGroupError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+        }
+    }
+}
+
+impl Error for SubjectGroupError {}
+
+/// Type alias for SubjectGroup entity operation results.
+pub type SubjectGroupResult<T> = Result<T, SubjectGroupError>;
+
+// ============================================================================
 // TESTS
 // ============================================================================
 
@@ -254,5 +300,18 @@ mod tests {
         assert_error::<ShareError>();
         assert_error::<CalendarError>();
         assert_error::<CalendarEventError>();
+        assert_error::<SubjectGroupError>();
+    }
+
+    #[test]
+    fn test_subject_group_error_display() {
+        let err = SubjectGroupError::InvalidName("Engineering Team".to_string());
+        assert_eq!(err.to_string(), "Invalid group name: Engineering Team");
+
+        let err = SubjectGroupError::CycleDetected("qa → engineering → qa".to_string());
+        assert_eq!(err.to_string(), "Cycle detected: qa → engineering → qa");
+
+        let err = SubjectGroupError::DepthExceeded("would reach depth 9".to_string());
+        assert_eq!(err.to_string(), "Group depth exceeded: would reach depth 9");
     }
 }

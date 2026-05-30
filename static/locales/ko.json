@@ -131,7 +131,8 @@
             "light": "라이트",
             "dark": "다크",
             "auto": "시스템과 동일"
-        }
+        },
+        "manage_groups": "그룹 관리"
     },
     "share": {
         "dialogTitle": "공유 링크",
@@ -336,7 +337,13 @@
         "move_error": "이동 오류",
         "empty_name": "이름은 비워둘 수 없습니다",
         "name_exists": "같은 이름의 파일 또는 폴더가 이미 존재합니다",
-        "generic_error": "오류가 발생했습니다"
+        "generic_error": "오류가 발생했습니다",
+        "group_name_invalid": "그룹 이름은 이메일 접두사 형식과 일치해야 합니다(문자, 숫자, 점, 대시, 밑줄; 1–64자).",
+        "group_cycle": "이 구성원은 그룹 간 순환 참조를 만들 것입니다.",
+        "group_depth_exceeded": "중첩 깊이가 허용 최대값(8)을 초과합니다.",
+        "group_virtual_immutable": "«Internal» 그룹은 시스템이 관리하며 수정할 수 없습니다.",
+        "group_not_found": "그룹을 찾을 수 없습니다.",
+        "group_name_taken": "이 이름의 그룹이 이미 존재합니다."
     },
     "breadcrumb": {
         "home": "홈"
@@ -755,5 +762,31 @@
         "today": "오늘",
         "last7days": "최근 7일",
         "last30days": "최근 30일"
+    },
+    "groups": {
+        "title": "그룹 관리",
+        "create_button": "그룹 생성",
+        "create_dialog_title": "새 그룹",
+        "edit_dialog_title": "그룹 이름 변경",
+        "name_label": "이름",
+        "name_placeholder": "engineering",
+        "description_label": "설명(선택사항)",
+        "members_section": "구성원",
+        "add_member_placeholder": "사용자 또는 그룹 추가…",
+        "no_members": "아직 구성원이 없습니다.",
+        "remove_member": "제거",
+        "delete_group": "그룹 삭제",
+        "delete_confirm": "\"{name}\" 그룹을 삭제하시겠습니까? 이 그룹을 참조하는 모든 권한이 해제됩니다.",
+        "empty_state": "아직 그룹이 없습니다.",
+        "load_more": "더 보기",
+        "back_to_list": "뒤로",
+        "loading": "로딩 중…",
+        "virtual_badge": "시스템",
+        "member_count_zero": "구성원 없음",
+        "member_count_one": "구성원 1명",
+        "member_count_other": "구성원 {count}명",
+        "delete_confirm_label": "확인을 위해 그룹 이름을 입력하세요:",
+        "delete_confirm_mismatch": "확인을 위해 그룹 이름을 정확히 입력하세요.",
+        "virtual_internal_name": "내부"
     }
 }

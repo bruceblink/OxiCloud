@@ -131,7 +131,8 @@
             "light": "हल्का",
             "dark": "गहरा",
             "auto": "सिस्टम जैसा"
-        }
+        },
+        "manage_groups": "समूह प्रबंधित करें"
     },
     "share": {
         "dialogTitle": "शेयर लिंक",
@@ -336,7 +337,13 @@
         "move_error": "ले जाने में त्रुटि",
         "empty_name": "नाम खाली नहीं हो सकता",
         "name_exists": "इस नाम की फ़ाइल या फ़ोल्डर पहले से मौजूद है",
-        "generic_error": "एक त्रुटि हुई है"
+        "generic_error": "एक त्रुटि हुई है",
+        "group_name_invalid": "समूह का नाम ईमेल उपसर्ग प्रारूप के अनुरूप होना चाहिए (अक्षर, अंक, बिंदु, डैश, अंडरस्कोर; 1–64 वर्ण).",
+        "group_cycle": "यह सदस्य समूहों के बीच चक्रीय संदर्भ बनाएगा।",
+        "group_depth_exceeded": "यह नेस्टिंग गहराई अनुमत अधिकतम (8) से अधिक है।",
+        "group_virtual_immutable": "«Internal» समूह सिस्टम द्वारा प्रबंधित है और इसे संशोधित नहीं किया जा सकता।",
+        "group_not_found": "समूह नहीं मिला।",
+        "group_name_taken": "इस नाम का एक समूह पहले से मौजूद है।"
     },
     "breadcrumb": {
         "home": "होम"
@@ -755,5 +762,31 @@
         "today": "आज",
         "last7days": "पिछले 7 दिन",
         "last30days": "पिछले 30 दिन"
+    },
+    "groups": {
+        "title": "समूह प्रबंधित करें",
+        "create_button": "समूह बनाएँ",
+        "create_dialog_title": "नया समूह",
+        "edit_dialog_title": "समूह का नाम बदलें",
+        "name_label": "नाम",
+        "name_placeholder": "engineering",
+        "description_label": "विवरण (वैकल्पिक)",
+        "members_section": "सदस्य",
+        "add_member_placeholder": "उपयोगकर्ता या समूह जोड़ें…",
+        "no_members": "अभी तक कोई सदस्य नहीं।",
+        "remove_member": "हटाएँ",
+        "delete_group": "समूह हटाएँ",
+        "delete_confirm": "समूह \"{name}\" को हटाएँ? इस समूह से जुड़ी अनुमतियाँ रद्द कर दी जाएँगी।",
+        "empty_state": "अभी तक कोई समूह नहीं।",
+        "load_more": "और लोड करें",
+        "back_to_list": "वापस",
+        "loading": "लोड हो रहा है…",
+        "virtual_badge": "सिस्टम",
+        "member_count_zero": "कोई सदस्य नहीं",
+        "member_count_one": "1 सदस्य",
+        "member_count_other": "{count} सदस्य",
+        "delete_confirm_label": "पुष्टि के लिए समूह का नाम लिखें:",
+        "delete_confirm_mismatch": "पुष्टि के लिए समूह का नाम बिल्कुल वैसा ही लिखें।",
+        "virtual_internal_name": "आंतरिक"
     }
 }

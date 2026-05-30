@@ -18,6 +18,7 @@ pub mod photos_handler;
 pub mod recent_handler;
 pub mod search_handler;
 pub mod share_handler;
+pub mod subject_group_handler;
 pub mod trash_handler;
 pub mod webdav_handler;
 pub mod wopi_handler;

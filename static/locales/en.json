@@ -131,7 +131,8 @@
             "light": "Light",
             "dark": "Dark",
             "auto": "Like OS"
-        }
+        },
+        "manage_groups": "Manage groups"
     },
     "share": {
         "dialogTitle": "Share Link",
@@ -336,7 +337,13 @@
         "move_error": "Error moving",
         "empty_name": "Name cannot be empty",
         "name_exists": "A file or folder with that name already exists",
-        "generic_error": "An error has occurred"
+        "generic_error": "An error has occurred",
+        "group_name_invalid": "Group name must match the email-prefix format (letters, digits, dot, dash, underscore; 1–64 chars).",
+        "group_cycle": "This member would create a circular group reference.",
+        "group_depth_exceeded": "This nesting depth exceeds the maximum allowed (8).",
+        "group_virtual_immutable": "The 'Internal' group is system-managed and cannot be modified.",
+        "group_not_found": "Group not found.",
+        "group_name_taken": "A group with this name already exists."
     },
     "breadcrumb": {
         "home": "Home"
@@ -755,5 +762,31 @@
         "today": "Today",
         "last7days": "Last 7 days",
         "last30days": "Last 30 days"
+    },
+    "groups": {
+        "title": "Manage groups",
+        "create_button": "Create group",
+        "create_dialog_title": "New group",
+        "edit_dialog_title": "Rename group",
+        "name_label": "Name",
+        "name_placeholder": "engineering",
+        "description_label": "Description (optional)",
+        "members_section": "Members",
+        "add_member_placeholder": "Add a user or group…",
+        "no_members": "No members yet.",
+        "remove_member": "Remove",
+        "delete_group": "Delete group",
+        "delete_confirm": "Delete the group \"{name}\"? Grants referencing this group will be revoked.",
+        "empty_state": "No groups yet.",
+        "load_more": "Load more",
+        "back_to_list": "Back",
+        "loading": "Loading…",
+        "virtual_badge": "System",
+        "member_count_zero": "no members",
+        "member_count_one": "1 member",
+        "member_count_other": "{count} members",
+        "delete_confirm_label": "Type the group name to confirm:",
+        "delete_confirm_mismatch": "Type the group name exactly to confirm.",
+        "virtual_internal_name": "Internal"
     }
 }

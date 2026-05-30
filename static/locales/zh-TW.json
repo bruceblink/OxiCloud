@@ -131,7 +131,8 @@
             "light": "淺色",
             "dark": "深色",
             "auto": "跟隨系統"
-        }
+        },
+        "manage_groups": "管理群組"
     },
     "share": {
         "dialogTitle": "共享連結",
@@ -336,7 +337,13 @@
         "move_error": "移動時出錯",
         "empty_name": "名稱不能為空",
         "name_exists": "已存在同名檔案或資料夾",
-        "generic_error": "發生錯誤"
+        "generic_error": "發生錯誤",
+        "group_name_invalid": "群組名稱必須符合電子郵件前綴格式（字母、數字、點、連字符、下劃線；1–64 個字元）。",
+        "group_cycle": "此成員會在群組之間形成循環參照。",
+        "group_depth_exceeded": "嵌套深度超過允許的最大值（8）。",
+        "group_virtual_immutable": "「Internal」群組由系統管理，無法修改。",
+        "group_not_found": "找不到群組。",
+        "group_name_taken": "已存在同名群組。"
     },
     "breadcrumb": {
         "home": "主頁"
@@ -755,5 +762,31 @@
         "today": "今天",
         "last7days": "近7天",
         "last30days": "近30天"
+    },
+    "groups": {
+        "title": "管理群組",
+        "create_button": "建立群組",
+        "create_dialog_title": "新群組",
+        "edit_dialog_title": "重新命名群組",
+        "name_label": "名稱",
+        "name_placeholder": "engineering",
+        "description_label": "描述（選填）",
+        "members_section": "成員",
+        "add_member_placeholder": "新增使用者或群組…",
+        "no_members": "尚無成員。",
+        "remove_member": "移除",
+        "delete_group": "刪除群組",
+        "delete_confirm": "刪除群組「{name}」？引用此群組的所有授權將被撤銷。",
+        "empty_state": "尚無群組。",
+        "load_more": "載入更多",
+        "back_to_list": "返回",
+        "loading": "載入中…",
+        "virtual_badge": "系統",
+        "member_count_zero": "無成員",
+        "member_count_one": "1 個成員",
+        "member_count_other": "{count} 個成員",
+        "delete_confirm_label": "請輸入群組名稱以確認：",
+        "delete_confirm_mismatch": "請準確輸入群組名稱以確認。",
+        "virtual_internal_name": "內部"
     }
 }

@@ -1,7 +1,7 @@
 use axum::{
     Router,
     extract::{Json, Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, post, put},
 };
@@ -12,9 +12,9 @@ use crate::application::dtos::settings_dto::{
     TestOidcConnectionDto, TestStorageConnectionDto, UpdateUserActiveDto, UpdateUserQuotaDto,
     UpdateUserRoleDto, VerifyMigrationDto,
 };
-use crate::application::ports::auth_ports::TokenServicePort;
 use crate::common::di::AppState;
 use crate::interfaces::errors::AppError;
+use crate::interfaces::middleware::admin::require_admin;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -61,42 +61,12 @@ pub fn admin_routes() -> Router<Arc<AppState>> {
 }
 
 /// Validate JWT and require admin role. Returns (user_id, role).
+///
+/// Thin wrapper over the shared `require_admin` middleware helper so this
+/// handler keeps a stable signature while the implementation lives next to
+/// the new `subject_group_handler` that also needs it.
 async fn admin_guard(state: &AppState, headers: &HeaderMap) -> Result<(Uuid, String), AppError> {
-    let auth = state
-        .auth_service
-        .as_ref()
-        .ok_or_else(|| AppError::internal_error("Auth service not configured"))?;
-
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ").map(|s| s.to_string()))
-        .or_else(|| {
-            crate::interfaces::api::cookie_auth::extract_cookie_value(
-                headers,
-                crate::interfaces::api::cookie_auth::ACCESS_COOKIE,
-            )
-        })
-        .ok_or_else(|| AppError::unauthorized("Authorization token required"))?;
-
-    let claims = auth
-        .token_service
-        .validate_token(&token)
-        .map_err(|e| AppError::unauthorized(format!("Invalid token: {}", e)))?;
-
-    if claims.role != "admin" {
-        return Err(AppError::new(
-            StatusCode::FORBIDDEN,
-            "Admin access required",
-            "Forbidden",
-        ));
-    }
-
-    Ok((
-        Uuid::parse_str(&claims.sub)
-            .map_err(|_| AppError::internal_error("Invalid user ID in token"))?,
-        claims.role,
-    ))
+    require_admin(state, headers).await
 }
 
 /// GET /api/admin/settings/oidc — get OIDC settings for the admin panel

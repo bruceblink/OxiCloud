@@ -9,11 +9,13 @@ pub mod folder;
 pub mod playlist;
 pub mod session;
 pub mod share;
+pub mod subject_group;
 pub mod trashed_item;
 pub mod user;
 
 // Re-exportar errores de entidades para facilitar el uso
 pub use entity_errors::{
     CalendarError, CalendarEventError, CalendarEventResult, CalendarResult, FileError, FileResult,
-    FolderError, FolderResult, ShareError, ShareResult, UserError, UserResult,
+    FolderError, FolderResult, ShareError, ShareResult, SubjectGroupError, SubjectGroupResult,
+    UserError, UserResult,
 };

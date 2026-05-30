@@ -15,6 +15,8 @@ import { fileSharing } from '../features/sharing/fileSharing.js';
 import { grants } from '../model/grants.js';
 import { buildExpiryChip } from '../utils/expiryChip.js';
 import { buildPasswordChip } from '../utils/passwordChip.js';
+import { groupDisplayName, groupIconClass } from './groupDisplay.js';
+import { createGroupVignette } from './groupVignette.js';
 import { buildLinkChip } from './linkChip.js';
 import { buildResourceIcon } from './resourceIcon.js';
 import { buildRoleChip, roleLabel } from './roleChip.js';
@@ -40,6 +42,26 @@ function _expiryState(expiresAt) {
     return 'active';
 }
 
+/**
+ * Extract the unique group subject IDs across all grants in a page.
+ * Callers feed the result to `groups.resolveGroups(...)` so rows can render
+ * the group's display name instead of its UUID.
+ *
+ * @param {OutgoingResourceItem[]} items
+ * @returns {Set<string>}
+ */
+function collectGroupSubjectIds(items) {
+    const out = new Set();
+    for (const item of items) {
+        for (const g of item.grants) {
+            if (g.subject_type === 'group') out.add(g.subject_id);
+        }
+    }
+    return out;
+}
+
+export { collectGroupSubjectIds };
+
 class MySharesList {
     /**
      * @param {HTMLElement} container
@@ -55,6 +77,47 @@ class MySharesList {
         this._lastSwimKey = null;
         /** @type {HTMLElement|null} */
         this._lastSwimEl = null;
+        /**
+         * Cached map of group subject UUID → full GroupItem. Populated by
+         * the view via `setGroupMeta()` before each `render()` / `append()`
+         * so group lane headers and identity rows render with the localised
+         * name + virtual-aware icon.
+         * @type {Record<string, import('../core/types.js').GroupItem>}
+         */
+        this._groupMeta = {};
+    }
+
+    /**
+     * Provide a resolved id→GroupItem map for group subjects expected in
+     * the next render / append call. Replaces (does not merge) any previous
+     * map.
+     * @param {Record<string, import('../core/types.js').GroupItem>} map
+     */
+    setGroupMeta(map) {
+        this._groupMeta = map;
+    }
+
+    /**
+     * Best-effort display name for a group subject. Falls back to the UUID
+     * when no entry has been resolved yet — better than nothing while the
+     * resolve query is in flight.
+     * @param {string} groupId
+     * @returns {string}
+     */
+    _groupName(groupId) {
+        const g = this._groupMeta[groupId];
+        return g ? groupDisplayName(g) : groupId;
+    }
+
+    /**
+     * Icon class for a group subject. Falls back to the regular group icon
+     * if the entry hasn't been resolved yet.
+     * @param {string} groupId
+     * @returns {string}
+     */
+    _groupIcon(groupId) {
+        const g = this._groupMeta[groupId];
+        return g ? groupIconClass(g) : 'fa-user-group';
     }
 
     clear() {
@@ -119,6 +182,8 @@ class MySharesList {
             let swimKey;
             if (grant.subject_type === 'user') {
                 swimKey = `user:${grant.subject_id}`;
+            } else if (grant.subject_type === 'group') {
+                swimKey = `group:${grant.subject_id}`;
             } else if (grant.has_password) {
                 swimKey = 'links:password';
             } else {
@@ -201,6 +266,11 @@ class MySharesList {
         if (swimKey.startsWith('user:')) {
             return createUserVignette(grant.subject_id, 'list');
         }
+        if (swimKey.startsWith('group:')) {
+            return createGroupVignette(this._groupName(grant.subject_id), 'list', {
+                icon: this._groupIcon(grant.subject_id)
+            });
+        }
         const el = document.createElement('div');
         el.className = 'ms-link-lane-label';
         const icon = document.createElement('i');
@@ -258,8 +328,8 @@ class MySharesList {
         const el = document.createElement('div');
         el.className = 'ms-grant-row__identity';
 
-        if (grant.subject_type === 'user' && viewMode === 'sharedWith') {
-            // Lane header is already the user — show the resource instead
+        if ((grant.subject_type === 'user' || grant.subject_type === 'group') && viewMode === 'sharedWith') {
+            // Lane header is already the subject — show the resource instead.
             el.appendChild(buildResourceIcon(item.resource, item.resource_type));
             const nameLink = document.createElement('a');
             nameLink.className = 'ms-identity__resource-name';
@@ -272,6 +342,12 @@ class MySharesList {
             el.appendChild(nameLink);
         } else if (grant.subject_type === 'user') {
             el.appendChild(createUserVignette(grant.subject_id, 'xs'));
+        } else if (grant.subject_type === 'group') {
+            el.appendChild(
+                createGroupVignette(this._groupName(grant.subject_id), 'xs', {
+                    icon: this._groupIcon(grant.subject_id)
+                })
+            );
         } else {
             // Token — link chip handles icon + label + copy-on-click
             el.appendChild(buildLinkChip(grant));
@@ -355,7 +431,7 @@ class MySharesList {
         // Current expiry as YYYY-MM-DD (or null)
         const initialExpiry = grant.expires_at ? String(grant.expires_at).slice(0, 10) : null;
 
-        if (grant.subject_type === 'user') {
+        if (grant.subject_type === 'user' || grant.subject_type === 'group') {
             for (const role of /** @type {('admin'|'editor'|'viewer')[]} */ (['admin', 'editor', 'viewer'])) {
                 const isCurrent = grant.role === role;
                 const mi = this._menuItem(isCurrent ? 'fas fa-check' : '', roleLabel(role), false, async () => {
@@ -376,8 +452,9 @@ class MySharesList {
             menu.appendChild(this._menuSeparator());
             menu.appendChild(this._menuExpiryRow(grant, item, rowEl, initialExpiry));
             menu.appendChild(this._menuSeparator());
+            const removeIcon = grant.subject_type === 'group' ? 'fas fa-user-group' : 'fas fa-user-times';
             menu.appendChild(
-                this._menuItem('fas fa-user-times', i18n.t('myshares.removeAccess', 'Remove access'), true, async () => {
+                this._menuItem(removeIcon, i18n.t('myshares.removeAccess', 'Remove access'), true, async () => {
                     menu.remove();
                     await grants.revokeGrant(grant.grant_id);
                     this._removeRowAndCleanLane(rowEl);

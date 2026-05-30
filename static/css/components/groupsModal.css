@@ -1,0 +1,308 @@
+/* ── Groups management modal — content styles ─────────────────────────────────
+ *
+ * Hosted by Modal.openPanel(). Only this file's content scrolls; the overlay,
+ * container, header and footer come from modals.css.
+ *
+ * Two states share the same body: list (rows of groups + Create button) and
+ * detail (single-group editor). Switching is a body-level replaceChildren
+ * call; the modal frame stays open.
+ *
+ * BEM root: `.groups-modal`. All colours via design tokens.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.groups-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px;
+}
+
+/* ── Common ─────────────────────────────────────────────────────────────── */
+
+.groups-modal__status,
+.groups-modal__empty-line {
+    color: var(--color-text-subtle);
+    font-size: 13px;
+    padding: 8px 0;
+}
+
+.groups-modal__error {
+    color: var(--color-danger-text);
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-alt);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+}
+
+.groups-modal__inline-error {
+    margin: 0 0 8px 0;
+    color: var(--color-danger-text);
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-alt);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.groups-modal__section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+}
+
+/* ── List view ──────────────────────────────────────────────────────────── */
+
+.groups-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.groups-modal__subtitle {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+.groups-modal__create-btn {
+    flex-shrink: 0;
+}
+
+.groups-modal__list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.groups-modal__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.groups-modal__row:hover,
+.groups-modal__row:focus-visible {
+    background: var(--color-bg-hover);
+    outline: none;
+}
+
+.groups-modal__row-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.groups-modal__row-desc {
+    color: var(--color-text-subtle);
+    font-size: 12px;
+    margin-left: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1;
+}
+
+.groups-modal__row-badge {
+    background: var(--color-bg-muted);
+    color: var(--color-text-subtle);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.groups-modal__row-count {
+    color: var(--color-text-subtle);
+    font-size: 12px;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-left: 8px;
+    white-space: nowrap;
+}
+
+.groups-modal__load-more {
+    align-self: center;
+    margin-top: 12px;
+}
+
+.groups-modal__empty {
+    text-align: center;
+    color: var(--color-text-subtle);
+    padding: 32px 12px;
+}
+
+.groups-modal__empty-icon {
+    font-size: 32px;
+    color: var(--color-text-faint);
+    margin-bottom: 8px;
+    display: block;
+}
+
+/* ── Detail view ────────────────────────────────────────────────────────── */
+
+.groups-modal__detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.groups-modal__back-btn {
+    flex-shrink: 0;
+}
+
+.groups-modal__detail-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.groups-modal__members {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.groups-modal__member-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    border-radius: 6px;
+    transition: background-color 0.12s ease;
+}
+
+.groups-modal__member-row:hover {
+    background: var(--color-bg-hover);
+}
+
+.groups-modal__member-remove {
+    flex-shrink: 0;
+    color: var(--color-text-subtle);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+}
+
+.groups-modal__member-remove:hover {
+    color: var(--color-danger-text);
+    background: var(--color-danger-bg);
+}
+
+/* ── Add-member row ─────────────────────────────────────────────────────── */
+
+.groups-modal__add-row {
+    position: relative;
+    margin-top: 8px;
+}
+
+.groups-modal__add-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg-surface);
+    color: var(--color-text);
+    font-size: 13px;
+}
+
+.groups-modal__add-input:focus {
+    outline: 2px solid var(--color-accent-ring);
+    outline-offset: -1px;
+    border-color: var(--color-accent);
+}
+
+.groups-modal__add-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px var(--color-shadow);
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 10;
+}
+
+.groups-modal__add-dropdown.hidden {
+    display: none;
+}
+
+.groups-modal__add-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.groups-modal__add-item:hover,
+.groups-modal__add-item:focus-visible {
+    background: var(--color-bg-hover);
+    outline: none;
+}
+
+/* ── Destructive footer ─────────────────────────────────────────────────── */
+
+.groups-modal__footer {
+    display: flex;
+    justify-content: flex-start;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border);
+    margin-top: 8px;
+}
+
+/* ── Inline create / rename / confirm-delete forms ──────────────────────── */
+/* Modal is a singleton; nesting Modal.prompt inside an open openPanel()
+ * can't surface its input. We render the form inside the panel body
+ * instead, swapping back to list / detail on submit or cancel. */
+
+.groups-modal__form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.groups-modal__form-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+}
+
+.groups-modal__form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.groups-modal__inline-error.hidden {
+    display: none;
+}

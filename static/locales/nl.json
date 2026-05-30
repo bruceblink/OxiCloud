@@ -131,7 +131,8 @@
             "light": "Licht",
             "dark": "Donker",
             "auto": "Zoals systeem"
-        }
+        },
+        "manage_groups": "Groepen beheren"
     },
     "share": {
         "dialogTitle": "Deellink",
@@ -336,7 +337,13 @@
         "move_error": "Fout bij verplaatsen",
         "empty_name": "Naam mag niet leeg zijn",
         "name_exists": "Een bestand of map met deze naam bestaat al",
-        "generic_error": "Er is een fout opgetreden"
+        "generic_error": "Er is een fout opgetreden",
+        "group_name_invalid": "De groepsnaam moet voldoen aan het e-mailprefix-formaat (letters, cijfers, punt, streepje, underscore; 1–64 tekens).",
+        "group_cycle": "Dit lid zou een circulaire groepsverwijzing veroorzaken.",
+        "group_depth_exceeded": "Deze nestdiepte overschrijdt het maximum (8).",
+        "group_virtual_immutable": "De groep 'Internal' wordt door het systeem beheerd en kan niet worden gewijzigd.",
+        "group_not_found": "Groep niet gevonden.",
+        "group_name_taken": "Er bestaat al een groep met deze naam."
     },
     "breadcrumb": {
         "home": "Start"
@@ -755,5 +762,31 @@
         "today": "Vandaag",
         "last7days": "Afgelopen 7 dagen",
         "last30days": "Afgelopen 30 dagen"
+    },
+    "groups": {
+        "title": "Groepen beheren",
+        "create_button": "Groep maken",
+        "create_dialog_title": "Nieuwe groep",
+        "edit_dialog_title": "Groep hernoemen",
+        "name_label": "Naam",
+        "name_placeholder": "engineering",
+        "description_label": "Beschrijving (optioneel)",
+        "members_section": "Leden",
+        "add_member_placeholder": "Een gebruiker of groep toevoegen…",
+        "no_members": "Nog geen leden.",
+        "remove_member": "Verwijderen",
+        "delete_group": "Groep verwijderen",
+        "delete_confirm": "De groep \"{name}\" verwijderen? Aan deze groep gekoppelde rechten worden ingetrokken.",
+        "empty_state": "Nog geen groepen.",
+        "load_more": "Meer laden",
+        "back_to_list": "Terug",
+        "loading": "Bezig met laden…",
+        "virtual_badge": "Systeem",
+        "member_count_zero": "Geen leden",
+        "member_count_one": "1 lid",
+        "member_count_other": "{count} leden",
+        "delete_confirm_label": "Typ de groepsnaam ter bevestiging:",
+        "delete_confirm_mismatch": "Typ de groepsnaam exact om te bevestigen.",
+        "virtual_internal_name": "Intern"
     }
 }

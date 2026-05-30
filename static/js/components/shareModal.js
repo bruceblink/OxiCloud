@@ -19,13 +19,28 @@ import { i18n } from '../core/i18n.js';
 import { fileSharing } from '../features/sharing/fileSharing.js';
 import { addressBook, SYSTEM_BOOK_ID } from '../model/addressBook.js';
 import { grants } from '../model/grants.js';
+import { groups } from '../model/groups.js';
 import { systemUsers } from '../model/systemUsers.js';
 import { buildExpiryChip } from '../utils/expiryChip.js';
 import { buildPasswordChip } from '../utils/passwordChip.js';
+import { groupDisplayName, groupIconClass, groupIconClassByVirtual } from './groupDisplay.js';
+import { createGroupVignette } from './groupVignette.js';
 import { Modal } from './modal.js';
 import { createUserVignette } from './userVignette.js';
 
 /** @import {FileItem, FolderItem, Grant, ContactItem, MemberEntry, LinkEntry, DraftLink, ShareRoleEnum} from '../core/types.js' */
+
+/**
+ * A ReBAC subject group surfaced by `/api/groups/search`. Shape is a
+ * deliberate superset of `ContactItem` so the staging / chip / commit code
+ * paths can treat both uniformly, discriminating on the `_kind` field.
+ *
+ * @typedef {Object} GroupSuggestion
+ * @property {string} id
+ * @property {string} name
+ * @property {boolean} is_virtual
+ * @property {'group'} _kind
+ */
 
 /** Permissions that belong to each role (must mirror the Rust DTO). */
 const ROLE_PERMISSIONS = {
@@ -33,6 +48,32 @@ const ROLE_PERMISSIONS = {
     editor: ['read', 'comment', 'create', 'update'],
     admin: ['read', 'comment', 'create', 'update', 'share', 'delete']
 };
+
+/**
+ * Fetch up to ~8 ReBAC subject groups whose name matches `q`. Authenticated
+ * endpoint; returns `[]` on any failure so the autocomplete degrades to
+ * contacts-only rather than breaking the dialog.
+ * @param {string} q
+ * @returns {Promise<GroupSuggestion[]>}
+ */
+async function _searchGroups(q) {
+    try {
+        const res = await fetch(`/api/groups/search?q=${encodeURIComponent(q)}&limit=8`, {
+            credentials: 'include'
+        });
+        if (!res.ok) return [];
+        /** @type {Array<{id:string,name:string,is_virtual:boolean}>} */
+        const items = await res.json();
+        return items.map((g) => ({
+            id: g.id,
+            name: g.name,
+            is_virtual: !!g.is_virtual,
+            _kind: /** @type {'group'} */ ('group')
+        }));
+    } catch {
+        return [];
+    }
+}
 
 /**
  * Derive the highest role a set of grants represents for one subject.
@@ -95,7 +136,7 @@ const shareModal = {
     /** @type {DraftLink[]} */
     _newLinks: [],
 
-    /** @type {ContactItem[]} */
+    /** @type {Array<ContactItem | GroupSuggestion>} */
     _stagedUsers: [],
 
     /** @type {ShareRoleEnum} */
@@ -157,6 +198,26 @@ const shareModal = {
 
             this._localMembers = _buildMembers(grantList);
             this._localLinks = linkList.map((share) => /** @type {LinkEntry} */ ({ share, _op: 'keep', _draft: null }));
+
+            // Group subjects in grants only carry their UUID — resolve full
+            // GroupItem records so member rows render the localised name and
+            // pick the correct icon (virtual groups get people-roof via
+            // `groupIconClass`).
+            const groupIds = new Set(this._localMembers.filter((m) => m.grant.subject.type === 'group').map((m) => m.grant.subject.id));
+            if (groupIds.size > 0) {
+                const resolved = await groups.resolveGroups(groupIds);
+                for (const m of this._localMembers) {
+                    if (m.grant.subject.type === 'group') {
+                        const g = resolved[m.grant.subject.id];
+                        if (g) {
+                            m._displayName = groupDisplayName(g);
+                            m._isVirtual = g.is_virtual;
+                        } else {
+                            m._displayName = m.grant.subject.id;
+                        }
+                    }
+                }
+            }
         } catch (err) {
             console.error('shareModal: load error', err);
         }
@@ -307,7 +368,10 @@ const shareModal = {
                 return;
             }
             debounce = setTimeout(async () => {
-                const results = await addressBook.searchContacts(q, [SYSTEM_BOOK_ID]);
+                // Search contacts (users) and ReBAC subject groups in parallel.
+                // Group results are tagged with `_kind='group'` so the rest of
+                // the dialog can render and commit them as group subjects.
+                const [contacts, groupItems] = await Promise.all([addressBook.searchContacts(q, [SYSTEM_BOOK_ID]), _searchGroups(q)]);
                 // Filter out the currently logged-in user — they cannot share with themselves
                 const currentUserId = (() => {
                     try {
@@ -316,9 +380,12 @@ const shareModal = {
                         return null;
                     }
                 })();
-                const filtered = currentUserId ? results.filter((c) => c.id !== currentUserId) : results;
-                this._renderSuggestions(dropdown, filtered.slice(0, 8), (contact) => {
-                    this._stageUser(contact, input, dropdown, addBtn);
+                const filtered = currentUserId ? contacts.filter((c) => c.id !== currentUserId) : contacts;
+                // Groups first (they're a smaller, distinctively-iconed set),
+                // then contacts. Cap at 8 combined.
+                const combined = [...groupItems, ...filtered].slice(0, 8);
+                this._renderSuggestions(dropdown, combined, (item) => {
+                    this._stageUser(item, input, dropdown, addBtn);
                 });
             }, 200);
         });
@@ -349,9 +416,9 @@ const shareModal = {
     },
 
     /**
-     * @param {HTMLElement}                container
-     * @param {ContactItem[]}              results
-     * @param {(c: ContactItem) => void}   onSelect
+     * @param {HTMLElement}                                          container
+     * @param {Array<ContactItem | GroupSuggestion>}                 results
+     * @param {(c: ContactItem | GroupSuggestion) => void}           onSelect
      */
     _renderSuggestions(container, results, onSelect) {
         container.replaceChildren();
@@ -364,7 +431,12 @@ const shareModal = {
             item.className = 'smd-suggestion-item';
             item.tabIndex = 0;
 
-            item.appendChild(createUserVignette(c.id, 'sm', { showEmail: true }));
+            if (c._kind === 'group') {
+                const g = /** @type {GroupSuggestion} */ (c);
+                item.appendChild(createGroupVignette(groupDisplayName(g), 'sm', { icon: groupIconClass(g) }));
+            } else {
+                item.appendChild(createUserVignette(c.id, 'sm', { showEmail: true }));
+            }
 
             const select = () => onSelect(c);
             item.addEventListener('click', select);
@@ -377,15 +449,18 @@ const shareModal = {
     },
 
     /**
-     * @param {ContactItem}     contact
-     * @param {HTMLInputElement} inputEl
-     * @param {HTMLElement}      dropdown
-     * @param {HTMLButtonElement} addBtn
+     * @param {ContactItem | GroupSuggestion} contact
+     * @param {HTMLInputElement}              inputEl
+     * @param {HTMLElement}                   dropdown
+     * @param {HTMLButtonElement}             addBtn
      */
     _stageUser(contact, inputEl, dropdown, addBtn) {
-        // Idempotent: skip duplicates and already-existing members
-        const alreadyMember = this._localMembers.some((m) => m.grant.subject.id === contact.id && m._op !== 'remove');
-        const alreadyStaged = this._stagedUsers.some((u) => u.id === contact.id);
+        // Idempotent: skip duplicates and already-existing members. Match on
+        // id *and* kind so a user and a group sharing a UUID collision (in
+        // theory impossible; in practice harmless) wouldn't shadow each other.
+        const kind = contact._kind === 'group' ? 'group' : 'user';
+        const alreadyMember = this._localMembers.some((m) => m.grant.subject.id === contact.id && m.grant.subject.type === kind && m._op !== 'remove');
+        const alreadyStaged = this._stagedUsers.some((u) => u.id === contact.id && (u._kind ?? 'user') === kind);
         if (alreadyMember || alreadyStaged) return;
 
         this._stagedUsers.push(contact);
@@ -422,20 +497,27 @@ const shareModal = {
             const chip = document.createElement('div');
             chip.className = 'smd-chip';
 
-            const vignette = createUserVignette(c.id, 'xs');
+            const visual =
+                c._kind === 'group'
+                    ? (() => {
+                          const g = /** @type {GroupSuggestion} */ (c);
+                          return createGroupVignette(groupDisplayName(g), 'xs', { icon: groupIconClass(g) });
+                      })()
+                    : createUserVignette(c.id, 'xs');
 
             const rm = document.createElement('button');
             rm.className = 'smd-chip-remove';
             rm.innerHTML = '&times;';
             rm.title = i18n.t('actions.remove', 'Remove');
+            const kind = c._kind === 'group' ? 'group' : 'user';
             rm.addEventListener('click', () => {
-                this._stagedUsers = this._stagedUsers.filter((u) => u.id !== c.id);
+                this._stagedUsers = this._stagedUsers.filter((u) => !(u.id === c.id && (u._kind ?? 'user') === kind));
                 this._refreshChips();
                 const addBtn = /** @type {HTMLButtonElement|null} */ (document.querySelector('.smd-add-btn'));
                 if (addBtn) addBtn.disabled = this._stagedUsers.length === 0;
             });
 
-            chip.appendChild(vignette);
+            chip.appendChild(visual);
             chip.appendChild(rm);
             container.appendChild(chip);
         });
@@ -443,12 +525,13 @@ const shareModal = {
 
     _commitStagedUsers() {
         for (const contact of this._stagedUsers) {
+            const subjectType = contact._kind === 'group' ? 'group' : 'user';
             /** @type {Grant} */
             const placeholderGrant = {
                 id: '', // not yet persisted
                 granted_at: '',
                 granted_by: '',
-                subject: { type: 'user', id: contact.id },
+                subject: { type: subjectType, id: contact.id },
                 permission: /** @type {import('../core/types.js').PermissionTypeEnum} */ (ROLE_PERMISSIONS[this._stagedRole][0]),
                 resource: { type: this._itemType, id: this._item?.id ?? '' }
             };
@@ -457,7 +540,8 @@ const shareModal = {
                 _grants: [], // no server grants yet — nothing to revoke on remove
                 role: this._stagedRole,
                 _op: 'new',
-                expires_at: this._stagedExpiry
+                expires_at: this._stagedExpiry,
+                _displayName: contact._kind === 'group' ? /** @type {GroupSuggestion} */ (contact).name : undefined
             });
         }
         this._stagedUsers = [];
@@ -528,7 +612,12 @@ const shareModal = {
         const row = document.createElement('div');
         row.className = 'smd-member-row';
 
-        const vignette = createUserVignette(entry.grant.subject.id, 'md');
+        const vignette =
+            entry.grant.subject.type === 'group'
+                ? createGroupVignette(entry._displayName ?? entry.grant.subject.id, 'md', {
+                      icon: groupIconClassByVirtual(entry._isVirtual)
+                  })
+                : createUserVignette(entry.grant.subject.id, 'md');
 
         const roleSelect = document.createElement('select');
         roleSelect.className = 'smd-member-role-select';

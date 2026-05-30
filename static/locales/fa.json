@@ -131,7 +131,8 @@
             "light": "روشن",
             "dark": "تاریک",
             "auto": "مانند سیستم"
-        }
+        },
+        "manage_groups": "مدیریت گروه‌ها"
     },
     "share": {
         "dialogTitle": "پیوند هم‌رسانی",
@@ -336,7 +337,13 @@
         "move_error": "خطا در انتقال",
         "empty_name": "نام نمی‌تواند خالی باشد",
         "name_exists": "پرونده یا پوشه‌ای با این نام قبلا وجود دارد",
-        "generic_error": "خطایی رخ داده است"
+        "generic_error": "خطایی رخ داده است",
+        "group_name_invalid": "نام گروه باید با قالب پیشوند ایمیل مطابقت داشته باشد (حروف، ارقام، نقطه، خط تیره، زیرخط؛ 1–64 نویسه).",
+        "group_cycle": "این عضو باعث ایجاد ارجاع چرخه‌ای بین گروه‌ها می‌شود.",
+        "group_depth_exceeded": "عمق تودرتو بیش از حداکثر مجاز (8) است.",
+        "group_virtual_immutable": "گروه «Internal» توسط سامانه مدیریت می‌شود و قابل تغییر نیست.",
+        "group_not_found": "گروه پیدا نشد.",
+        "group_name_taken": "گروهی با این نام پیش‌از این وجود دارد."
     },
     "breadcrumb": {
         "home": "صفحه اصلی"
@@ -755,5 +762,31 @@
         "today": "امروز",
         "last7days": "۷ روز گذشته",
         "last30days": "۳۰ روز گذشته"
+    },
+    "groups": {
+        "title": "مدیریت گروه‌ها",
+        "create_button": "ایجاد گروه",
+        "create_dialog_title": "گروه جدید",
+        "edit_dialog_title": "تغییر نام گروه",
+        "name_label": "نام",
+        "name_placeholder": "engineering",
+        "description_label": "توضیحات (اختیاری)",
+        "members_section": "اعضا",
+        "add_member_placeholder": "افزودن کاربر یا گروه…",
+        "no_members": "هنوز عضوی وجود ندارد.",
+        "remove_member": "حذف",
+        "delete_group": "حذف گروه",
+        "delete_confirm": "گروه «{name}» حذف شود؟ مجوزهای مرتبط با این گروه باطل خواهند شد.",
+        "empty_state": "هنوز گروهی وجود ندارد.",
+        "load_more": "بارگیری بیشتر",
+        "back_to_list": "بازگشت",
+        "loading": "در حال بارگذاری…",
+        "virtual_badge": "سامانه",
+        "member_count_zero": "بدون عضو",
+        "member_count_one": "۱ عضو",
+        "member_count_other": "{count} عضو",
+        "delete_confirm_label": "نام گروه را برای تأیید وارد کنید:",
+        "delete_confirm_mismatch": "نام گروه را دقیقاً برای تأیید وارد کنید.",
+        "virtual_internal_name": "داخلی"
     }
 }

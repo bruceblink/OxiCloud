@@ -131,7 +131,8 @@
             "light": "Claro",
             "dark": "Escuro",
             "auto": "Como o sistema"
-        }
+        },
+        "manage_groups": "Gerenciar grupos"
     },
     "share": {
         "dialogTitle": "Link de compartilhamento",
@@ -336,7 +337,13 @@
         "move_error": "Erro ao mover",
         "empty_name": "O nome não pode estar vazio",
         "name_exists": "Já existe um arquivo ou pasta com esse nome",
-        "generic_error": "Ocorreu um erro"
+        "generic_error": "Ocorreu um erro",
+        "group_name_invalid": "O nome do grupo deve seguir o formato de prefixo de e-mail (letras, dígitos, ponto, hífen, sublinhado; 1–64 caracteres).",
+        "group_cycle": "Este membro criaria uma referência circular entre grupos.",
+        "group_depth_exceeded": "Esta profundidade de aninhamento excede o máximo permitido (8).",
+        "group_virtual_immutable": "O grupo «Internal» é gerenciado pelo sistema e não pode ser modificado.",
+        "group_not_found": "Grupo não encontrado.",
+        "group_name_taken": "Já existe um grupo com este nome."
     },
     "breadcrumb": {
         "home": "Início"
@@ -755,5 +762,31 @@
         "today": "Hoje",
         "last7days": "Últimos 7 dias",
         "last30days": "Últimos 30 dias"
+    },
+    "groups": {
+        "title": "Gerenciar grupos",
+        "create_button": "Criar grupo",
+        "create_dialog_title": "Novo grupo",
+        "edit_dialog_title": "Renomear grupo",
+        "name_label": "Nome",
+        "name_placeholder": "engenharia",
+        "description_label": "Descrição (opcional)",
+        "members_section": "Membros",
+        "add_member_placeholder": "Adicionar um usuário ou grupo…",
+        "no_members": "Ainda não há membros.",
+        "remove_member": "Remover",
+        "delete_group": "Excluir grupo",
+        "delete_confirm": "Excluir o grupo \"{name}\"? As concessões que referenciam este grupo serão revogadas.",
+        "empty_state": "Ainda não há grupos.",
+        "load_more": "Carregar mais",
+        "back_to_list": "Voltar",
+        "loading": "Carregando…",
+        "virtual_badge": "Sistema",
+        "member_count_zero": "Sem membros",
+        "member_count_one": "1 membro",
+        "member_count_other": "{count} membros",
+        "delete_confirm_label": "Digite o nome do grupo para confirmar:",
+        "delete_confirm_mismatch": "Digite o nome do grupo exatamente para confirmar.",
+        "virtual_internal_name": "Interno"
     }
 }

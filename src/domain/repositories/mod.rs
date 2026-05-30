@@ -8,5 +8,6 @@ pub mod playlist_repository;
 pub mod session_repository;
 pub mod settings_repository;
 pub mod share_repository;
+pub mod subject_group_repository;
 pub mod trash_repository;
 pub mod user_repository;

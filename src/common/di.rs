@@ -638,10 +638,16 @@ impl AppServiceFactory {
 
         // 3a. Authorization engine — must exist before application services
         // because services hold an Arc<PgAclEngine> for ReBAC checks.
+        // SubjectGroupPgRepository is constructed here too so the engine can
+        // expand a user's transitive group set on cache misses.
+        let subject_group_repo = Arc::new(
+            crate::infrastructure::repositories::pg::SubjectGroupPgRepository::new(pool.clone()),
+        );
         let authorization = build_authorization_engine(
             pool.clone(),
             repos.folder_repository.clone(),
             repos.file_read_repository.clone(),
+            subject_group_repo.clone(),
         );
 
         // 3b. Trash service (needed before application services)
@@ -822,6 +828,12 @@ impl AppServiceFactory {
             webdav_lock_store:
                 crate::infrastructure::services::webdav_lock_service::create_webdav_lock_store(),
             authorization,
+            subject_group_service: Some(Arc::new(
+                crate::application::services::subject_group_service::SubjectGroupService::new(
+                    subject_group_repo.clone(),
+                    pool.clone(),
+                ),
+            )),
         };
 
         // 9b. Wire admin settings service when auth is available
@@ -1147,6 +1159,10 @@ pub struct AppState {
     /// an enum dispatcher or `Arc<dyn AuthorizationEngine>` (with
     /// `async_trait` boxing).
     pub authorization: Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine>,
+    /// ReBAC subject-group management (CRUD + membership). `None` when the
+    /// auth subsystem is not configured.
+    pub subject_group_service:
+        Option<Arc<crate::application::services::subject_group_service::SubjectGroupService>>,
 }
 
 // All AppState construction is done via struct literal in build_app_state().
@@ -1162,6 +1178,7 @@ fn build_authorization_engine(
     file_repo: Arc<
         crate::infrastructure::repositories::pg::file_blob_read_repository::FileBlobReadRepository,
     >,
+    group_repo: Arc<crate::infrastructure::repositories::pg::SubjectGroupPgRepository>,
 ) -> Arc<crate::infrastructure::services::pg_acl_engine::PgAclEngine> {
     use crate::infrastructure::services::pg_acl_engine::PgAclEngine;
 
@@ -1173,5 +1190,5 @@ fn build_authorization_engine(
             "OXICLOUD_AUTHZ_ENGINE={other:?} is not yet supported. Only 'postgres' is implemented; leave the variable unset to use the default."
         );
     }
-    Arc::new(PgAclEngine::new(pool, folder_repo, file_repo))
+    Arc::new(PgAclEngine::new(pool, folder_repo, file_repo, group_repo))
 }

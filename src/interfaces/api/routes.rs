@@ -563,6 +563,14 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
     let admin_router = admin_handler::admin_routes().with_state(app_state.clone());
     router = router.nest("/admin", admin_router);
 
+    // ReBAC subject-group management. All mutating routes are admin-gated;
+    // /api/groups/search is authenticated-only so the share dialog can list
+    // groups as recipients.
+    let group_router =
+        crate::interfaces::api::handlers::subject_group_handler::subject_group_routes()
+            .with_state(app_state.clone());
+    router = router.nest("/groups", group_router);
+
     // Transparent compression (gzip + brotli) for all API responses.
     // tower-http negotiates via Accept-Encoding and skips already-compressed
     // content types automatically. No manual compression in handlers.

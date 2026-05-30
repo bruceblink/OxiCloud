@@ -6,6 +6,7 @@ import { createUserVignette } from '../components/userVignette.js';
 import { getCsrfHeaders } from '../core/csrf.js';
 import { formatFileSize, formatQuotaSize } from '../core/formatters.js';
 import { i18n } from '../core/i18n.js';
+import { groupsView } from '../views/groups/groupsView.js';
 
 function setupUserMenu() {
     const wrapper = document.getElementById('user-menu-wrapper');
@@ -15,6 +16,7 @@ function setupUserMenu() {
     const themeSegmented = document.getElementById('user-menu-theme-segmented');
     const aboutBtn = document.getElementById('user-menu-about');
     const adminBtn = document.getElementById('user-menu-admin');
+    const groupsBtn = document.getElementById('user-menu-groups');
     const adminDivider = document.getElementById('user-menu-admin-divider');
     const profileBtn = document.getElementById('user-menu-profile');
     const roleBadge = document.getElementById('user-menu-role-badge');
@@ -41,6 +43,12 @@ function setupUserMenu() {
             const isAdmin = userData.role === 'admin';
             if (adminBtn) {
                 isAdmin ? adminBtn.classList.remove('hidden') : adminBtn.classList.add('hidden');
+            }
+            if (groupsBtn) {
+                // v1: admin-only. v2 will broaden to "has any manageable
+                // group" — change the right-hand side here without touching
+                // anything else.
+                isAdmin ? groupsBtn.classList.remove('hidden') : groupsBtn.classList.add('hidden');
             }
             if (adminDivider) {
                 isAdmin ? adminDivider.classList.remove('hidden') : adminDivider.classList.add('hidden');
@@ -114,6 +122,13 @@ function setupUserMenu() {
         adminBtn.addEventListener('click', () => {
             wrapper.classList.remove('open');
             window.location.href = '/admin';
+        });
+    }
+
+    if (groupsBtn) {
+        groupsBtn.addEventListener('click', () => {
+            wrapper.classList.remove('open');
+            groupsView.open();
         });
     }
 

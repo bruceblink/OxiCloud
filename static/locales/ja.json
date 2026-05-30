@@ -131,7 +131,8 @@
             "light": "ライト",
             "dark": "ダーク",
             "auto": "システムに合わせる"
-        }
+        },
+        "manage_groups": "グループを管理"
     },
     "share": {
         "dialogTitle": "共有リンク",
@@ -336,7 +337,13 @@
         "move_error": "移動エラー",
         "empty_name": "名前を空にすることはできません",
         "name_exists": "同じ名前のファイルまたはフォルダが既に存在します",
-        "generic_error": "エラーが発生しました"
+        "generic_error": "エラーが発生しました",
+        "group_name_invalid": "グループ名はメールプレフィックス形式に一致している必要があります（文字、数字、ドット、ダッシュ、アンダースコア；1～64文字）。",
+        "group_cycle": "このメンバーはグループ間で循環参照を作成します。",
+        "group_depth_exceeded": "ネストの深さが許容されている最大値（8）を超えています。",
+        "group_virtual_immutable": "「Internal」グループはシステム管理であり、変更できません。",
+        "group_not_found": "グループが見つかりません。",
+        "group_name_taken": "この名前のグループはすでに存在します。"
     },
     "breadcrumb": {
         "home": "ホーム"
@@ -755,5 +762,31 @@
         "today": "今日",
         "last7days": "過去7日間",
         "last30days": "過去30日間"
+    },
+    "groups": {
+        "title": "グループを管理",
+        "create_button": "グループを作成",
+        "create_dialog_title": "新規グループ",
+        "edit_dialog_title": "グループ名を変更",
+        "name_label": "名前",
+        "name_placeholder": "engineering",
+        "description_label": "説明（任意）",
+        "members_section": "メンバー",
+        "add_member_placeholder": "ユーザーまたはグループを追加…",
+        "no_members": "メンバーはまだいません。",
+        "remove_member": "削除",
+        "delete_group": "グループを削除",
+        "delete_confirm": "グループ「{name}」を削除しますか？このグループを参照しているすべての権限が取り消されます。",
+        "empty_state": "グループはまだありません。",
+        "load_more": "もっと読み込む",
+        "back_to_list": "戻る",
+        "loading": "読み込み中…",
+        "virtual_badge": "システム",
+        "member_count_zero": "メンバーなし",
+        "member_count_one": "1 メンバー",
+        "member_count_other": "{count} メンバー",
+        "delete_confirm_label": "確認のためにグループ名を入力してください:",
+        "delete_confirm_mismatch": "確認のためにグループ名を正確に入力してください。",
+        "virtual_internal_name": "内部"
     }
 }

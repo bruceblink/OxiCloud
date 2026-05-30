@@ -230,6 +230,18 @@ use crate::interfaces::api::handlers::file_handler::MoveFilePayload;
         handlers::grant_handler::list_shared_with_me,
         handlers::grant_handler::list_outgoing,
         handlers::grant_handler::list_on_resource,
+        // Subject-group handlers (ReBAC named groups) — free functions
+        handlers::subject_group_handler::create_group,
+        handlers::subject_group_handler::list_groups,
+        handlers::subject_group_handler::search_groups,
+        handlers::subject_group_handler::get_group,
+        handlers::subject_group_handler::update_group,
+        handlers::subject_group_handler::delete_group,
+        handlers::subject_group_handler::list_members,
+        handlers::subject_group_handler::add_member,
+        handlers::subject_group_handler::remove_user_member,
+        handlers::subject_group_handler::remove_group_member,
+        handlers::subject_group_handler::list_effective_members,
     ),
     components(
         schemas(
@@ -319,6 +331,13 @@ use crate::interfaces::api::handlers::file_handler::MoveFilePayload;
             GrantDto,
             SharedWithMeDto,
             SharedWithMeItemDto,
+            // Subject-group (ReBAC named groups) schemas
+            handlers::subject_group_handler::CreateGroupRequest,
+            handlers::subject_group_handler::UpdateGroupRequest,
+            handlers::subject_group_handler::AddSubjectGroupMemberRequest,
+            handlers::subject_group_handler::GroupDto,
+            handlers::subject_group_handler::GroupListDto,
+            handlers::subject_group_handler::GroupMemberDto,
         )
     ),
     tags(
@@ -339,6 +358,7 @@ use crate::interfaces::api::handlers::file_handler::MoveFilePayload;
         (name = "contacts", description = "Address books, contacts, and groups endpoints"),
         (name = "admin", description = "Admin management endpoints"),
         (name = "grants", description = "ReBAC grant management endpoints"),
+        (name = "groups", description = "ReBAC subject-group management endpoints (named, nestable, root-owned)"),
     ),
     info(
         title = "OxiCloud API",
