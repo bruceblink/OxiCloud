@@ -142,7 +142,7 @@ const _registry = new WeakMap();
 /** Containers known to expose `data-path`/`data-owner-id` for tooltip use.
  *  Add new opt-in row classes here when other views want the tooltip — each
  *  one must stamp the dataset attributes itself. */
-const _TOOLTIP_SELECTOR = '.file-item, .ms-resource-row';
+const _TOOLTIP_SELECTOR = '.file-item, .ms-resource-row, .ms-grant-row';
 
 /**
  * Attach tooltip listeners to every tooltip-capable row inside `container`.

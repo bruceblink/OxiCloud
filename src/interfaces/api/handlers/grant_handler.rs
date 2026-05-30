@@ -676,12 +676,13 @@ pub async fn list_my_shares(
                 file_idx += 1;
                 match result {
                     Ok(file_dto) => {
+                        // Caller is the granter — they had share-access to the
+                        // resource, so the containing hierarchy is already known
+                        // to them. Keep `path` (unlike list_shared_with_me).
                         items.push(OutgoingResourceItemDto {
                             resource_type: ResourceTypeDto::File,
                             first_shared_at: summary.first_shared_at,
-                            resource: ResourceContentDto::File(
-                                file_dto.clone().without_hierarchy_info(),
-                            ),
+                            resource: ResourceContentDto::File(file_dto.clone()),
                             grants,
                         });
                     }
@@ -708,9 +709,7 @@ pub async fn list_my_shares(
                         items.push(OutgoingResourceItemDto {
                             resource_type: ResourceTypeDto::Folder,
                             first_shared_at: summary.first_shared_at,
-                            resource: ResourceContentDto::Folder(
-                                folder_dto.clone().without_hierarchy_info(),
-                            ),
+                            resource: ResourceContentDto::Folder(folder_dto.clone()),
                             grants,
                         });
                     }

@@ -167,6 +167,8 @@ class MySharesList {
     _buildResourceLaneHeader(item) {
         const row = document.createElement('div');
         row.className = 'ms-resource-row';
+        if (item.resource.path) row.dataset.path = item.resource.path;
+        if (item.resource.owner_id) row.dataset.ownerId = item.resource.owner_id;
 
         row.appendChild(buildResourceIcon(item.resource, item.resource_type));
 
@@ -228,6 +230,13 @@ class MySharesList {
         row.className = 'ms-grant-row';
         if (_expiryState(grant.expires_at ?? null) === 'expired') {
             row.classList.add('ms-grant-row--expired');
+        }
+        // In sharedWith mode each grant row represents a (resource → subject)
+        // pair, so stamp the resource hierarchy info for the hover tooltip.
+        // In items mode the row represents a subject — no resource attrs.
+        if (viewMode === 'sharedWith') {
+            if (item.resource.path) row.dataset.path = item.resource.path;
+            if (item.resource.owner_id) row.dataset.ownerId = item.resource.owner_id;
         }
 
         row.appendChild(this._buildIdentity(grant, item, viewMode));
