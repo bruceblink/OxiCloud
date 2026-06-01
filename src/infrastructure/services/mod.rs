@@ -23,6 +23,7 @@ pub mod pg_acl_engine;
 pub mod retry_blob_backend;
 pub mod s3_blob_backend;
 pub mod share_unlock_cookie;
+pub mod smtp_email_sender;
 pub mod thumbnail_service;
 #[cfg(test)]
 mod thumbnail_service_test;

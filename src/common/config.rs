@@ -609,6 +609,81 @@ impl NextcloudConfig {
     }
 }
 
+/// Transport encryption mode for the SMTP relay. Picked at startup
+/// from `OXICLOUD_SMTP_TLS=starttls|tls|none`. The default for an
+/// unconfigured deployment is `Starttls` (port 587 with `STARTTLS`),
+/// matching the most common modern submission setup.
+///
+/// `None` is allowed for development against MailHog / a local
+/// netcat trap. Production deployments using `None` get a startup
+/// `WARN` log so the choice is visible in operational telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmtpTlsMode {
+    /// Plain submission with `STARTTLS` upgrade (RFC 3207). Standard
+    /// for port 587.
+    Starttls,
+    /// Implicit TLS from the first byte (RFC 8314). Standard for
+    /// port 465.
+    Tls,
+    /// No encryption. Development only.
+    None,
+}
+
+impl SmtpTlsMode {
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "starttls" => Some(Self::Starttls),
+            "tls" | "implicit" | "smtps" => Some(Self::Tls),
+            "none" | "plain" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+/// Outbound SMTP transport configuration. Sourced exclusively from
+/// `OXICLOUD_SMTP_*` env vars. `host` empty means the feature is
+/// disabled — every endpoint that needs email returns 503 in that
+/// state so admins notice misconfiguration immediately rather than
+/// silently dropping mail.
+#[derive(Debug, Clone)]
+pub struct SmtpConfig {
+    /// SMTP server hostname or IP. Empty string disables the feature.
+    pub host: String,
+    /// Submission port (typically 587 for STARTTLS, 465 for implicit
+    /// TLS, 25 for relay-to-relay).
+    pub port: u16,
+    /// SASL username. Empty = no authentication (anonymous relay).
+    pub user: String,
+    /// SASL password. Logged as `***` redacted in startup banner.
+    pub pass: String,
+    /// `From:` mailbox. Either a bare address (`noreply@example.com`)
+    /// or RFC 5322 name-address (`OxiCloud <noreply@example.com>`).
+    pub from: String,
+    /// Transport encryption mode. See [`SmtpTlsMode`].
+    pub tls: SmtpTlsMode,
+}
+
+impl Default for SmtpConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 587,
+            user: String::new(),
+            pass: String::new(),
+            from: String::new(),
+            tls: SmtpTlsMode::Starttls,
+        }
+    }
+}
+
+impl SmtpConfig {
+    /// `true` iff `OXICLOUD_SMTP_HOST` was set to a non-empty value.
+    /// Used by DI to decide whether to construct an `EmailSender`.
+    pub fn is_enabled(&self) -> bool {
+        !self.host.is_empty()
+    }
+}
+
 /// Feature configuration (feature flags)
 #[derive(Debug, Clone)]
 pub struct FeaturesConfig {
@@ -670,6 +745,8 @@ pub struct AppConfig {
     pub wopi: WopiConfig,
     /// Nextcloud compatibility configuration
     pub nextcloud: NextcloudConfig,
+    /// Outbound SMTP configuration (magic-link invitations, etc.)
+    pub smtp: SmtpConfig,
 }
 
 impl Default for AppConfig {
@@ -690,6 +767,7 @@ impl Default for AppConfig {
             oidc: OidcConfig::default(),
             wopi: WopiConfig::default(),
             nextcloud: NextcloudConfig::default(),
+            smtp: SmtpConfig::default(),
         }
     }
 }
@@ -1150,6 +1228,38 @@ impl AppConfig {
             {
                 config.nextcloud.emulated_version = (maj, min, pat);
             }
+        }
+
+        // SMTP configuration. `HOST` empty = feature disabled — every
+        // endpoint that needs email returns 503 in that state.
+        if let Ok(v) = env::var("OXICLOUD_SMTP_HOST") {
+            config.smtp.host = v.trim().to_string();
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_PORT")
+            && let Ok(p) = v.parse::<u16>()
+        {
+            config.smtp.port = p;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_USER") {
+            config.smtp.user = v;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_PASS") {
+            config.smtp.pass = v;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_FROM") {
+            config.smtp.from = v;
+        }
+        if let Ok(v) = env::var("OXICLOUD_SMTP_TLS")
+            && let Some(mode) = SmtpTlsMode::parse(&v)
+        {
+            config.smtp.tls = mode;
+        }
+
+        if config.smtp.is_enabled() && config.smtp.tls == SmtpTlsMode::None {
+            tracing::warn!(
+                "OXICLOUD_SMTP_TLS=none — outbound mail will travel in plaintext. \
+                 Use 'starttls' or 'tls' for production deployments."
+            );
         }
 
         config

@@ -69,6 +69,7 @@ aes-gcm = "0.10.3"
 lru = "0.16.4"
 fastcdc = "4.0.0"
 memmap2 = "0.9.10"
+lettre = { version = "0.11.18", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "rustls-native-certs", "builder"] }
 
 [features]
 default = []

@@ -898,6 +898,7 @@ impl AppServiceFactory {
                     ),
                 ),
             )),
+            email_sender: build_email_sender(&self.config.smtp),
         };
 
         // 9b. Wire admin settings service when auth is available
@@ -1227,6 +1228,11 @@ pub struct AppState {
     /// auth subsystem is not configured.
     pub subject_group_service:
         Option<Arc<crate::application::services::subject_group_service::SubjectGroupService>>,
+    /// Outbound transactional email — `None` when `OXICLOUD_SMTP_HOST` is
+    /// empty. Endpoints that need email (magic-link invite, login-via-email)
+    /// must return 503 when this is `None` rather than silently dropping
+    /// the message.
+    pub email_sender: Option<Arc<dyn crate::application::ports::email_sender::EmailSender>>,
 }
 
 // All AppState construction is done via struct literal in build_app_state().
@@ -1255,4 +1261,44 @@ fn build_authorization_engine(
         );
     }
     Arc::new(PgAclEngine::new(pool, folder_repo, file_repo, group_repo))
+}
+
+/// Construct the SMTP email sender from config, or return `None` when
+/// SMTP is disabled (`OXICLOUD_SMTP_HOST` empty). Construction errors
+/// (unparseable `From:` mailbox, bad TLS settings) downgrade to `None`
+/// with a `WARN` log — the server still starts, but every magic-link
+/// endpoint will return 503 until the operator fixes the config.
+fn build_email_sender(
+    cfg: &crate::common::config::SmtpConfig,
+) -> Option<Arc<dyn crate::application::ports::email_sender::EmailSender>> {
+    if !cfg.is_enabled() {
+        tracing::info!(
+            "SMTP disabled (OXICLOUD_SMTP_HOST empty); magic-link endpoints will return 503"
+        );
+        return None;
+    }
+    match crate::infrastructure::services::smtp_email_sender::SmtpEmailSender::new(cfg) {
+        Ok(sender) => {
+            tracing::info!(
+                target: "oxicloud",
+                event = "smtp.configured",
+                host = %cfg.host,
+                port = cfg.port,
+                tls = ?cfg.tls,
+                from = %cfg.from,
+                user = if cfg.user.is_empty() { "<anon>" } else { "<set>" },
+                "SMTP sender configured",
+            );
+            Some(Arc::new(sender))
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "oxicloud",
+                event = "smtp.config_invalid",
+                error = %e,
+                "SMTP configuration is invalid; magic-link endpoints will return 503",
+            );
+            None
+        }
+    }
 }
