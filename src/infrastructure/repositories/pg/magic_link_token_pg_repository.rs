@@ -37,6 +37,7 @@ impl MagicLinkTokenPgRepository {
         let resource_type: Option<String> = row.try_get("resource_type").ok();
         let resource_kind = resource_type.and_then(|s| MagicLinkResourceKind::parse(&s));
         let resource_id: Option<Uuid> = row.try_get("resource_id").ok();
+        let request_challenge: Option<String> = row.try_get("request_challenge").ok();
 
         Ok(MagicLinkToken::from_raw(
             row.try_get("id").unwrap(),
@@ -48,6 +49,7 @@ impl MagicLinkTokenPgRepository {
             row.try_get("used_at").ok(),
             resource_kind,
             resource_id,
+            request_challenge,
         ))
     }
 }
@@ -60,11 +62,13 @@ impl MagicLinkTokenRepository for MagicLinkTokenPgRepository {
             INSERT INTO auth.magic_link_tokens (
                 id, token, user_id, status,
                 issued_at, expires_at, used_at,
-                resource_type, resource_id
+                resource_type, resource_id,
+                request_challenge
             ) VALUES (
                 $1, $2, $3, $4::auth.magic_link_status,
                 $5, $6, $7,
-                $8, $9
+                $8, $9,
+                $10
             )
             "#,
         )
@@ -77,6 +81,7 @@ impl MagicLinkTokenRepository for MagicLinkTokenPgRepository {
         .bind(token.used_at())
         .bind(token.resource_kind().map(|k| k.as_str()))
         .bind(token.resource_id())
+        .bind(token.request_challenge())
         .execute(self.pool.as_ref())
         .await
         .map_err(|e| DomainError::internal_error("MagicLinkToken", format!("insert: {}", e)))?;
@@ -88,7 +93,8 @@ impl MagicLinkTokenRepository for MagicLinkTokenPgRepository {
             r#"
             SELECT id, token, user_id, status::text AS status,
                    issued_at, expires_at, used_at,
-                   resource_type, resource_id
+                   resource_type, resource_id,
+                   request_challenge
               FROM auth.magic_link_tokens
              WHERE token = $1
             "#,

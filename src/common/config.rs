@@ -688,9 +688,24 @@ impl SmtpConfig {
 /// the invite-by-email / login-via-email flow.
 #[derive(Debug, Clone)]
 pub struct MagicLinkConfig {
-    /// How long a freshly-minted magic-link token stays valid before the
-    /// background sweeper marks it expired. Default: 24 hours.
-    pub ttl_hours: u64,
+    /// TTL for **login-via-email** tokens (the ones a user requests
+    /// themselves from their own browser). Short by design — the user
+    /// just clicked the button moments before; if they take >10 minutes
+    /// to click the link, something's wrong. Combined with the per-
+    /// request challenge cookie (PR 22), this bounds the window for
+    /// mailbox compromise to turn into a session.
+    ///
+    /// Default: 10 minutes.
+    pub login_ttl_minutes: u64,
+    /// TTL for **invitation** tokens (the ones a sharer mints via
+    /// `POST /api/grants` for a recipient who has no prior browser
+    /// context with the server). Long because the recipient may not
+    /// check their email for hours or days. Cross-device by design;
+    /// no challenge cookie.
+    ///
+    /// Default: 24 hours. The legacy `OXICLOUD_MAGIC_LINK_TTL_HOURS`
+    /// env var is a deprecated alias that writes here.
+    pub invite_ttl_hours: u64,
     /// Kill switch for the whole magic-link flow. When `false`:
     /// - `POST /api/grants` rejects `subject.type = "email"` for unknown
     ///   email addresses (no lazy external-user creation).
@@ -751,7 +766,8 @@ pub struct MagicLinkConfig {
 impl Default for MagicLinkConfig {
     fn default() -> Self {
         Self {
-            ttl_hours: 24,
+            login_ttl_minutes: 10,
+            invite_ttl_hours: 24,
             allow_external_users: true,
             allowed_email_domains: Vec::new(),
             invite_per_caller_per_hour: 50,
@@ -1370,11 +1386,32 @@ impl AppConfig {
         }
 
         // Magic-link configuration
+        // Legacy `OXICLOUD_MAGIC_LINK_TTL_HOURS` is preserved as a
+        // deprecated alias for `OXICLOUD_MAGIC_LINK_INVITE_TTL_HOURS`.
+        // Existing deployments keep working with their old env var;
+        // the new explicit var wins if both are set.
         if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_TTL_HOURS")
             && let Ok(h) = v.parse::<u64>()
             && h > 0
         {
-            config.magic_link.ttl_hours = h;
+            tracing::warn!(
+                "OXICLOUD_MAGIC_LINK_TTL_HOURS is deprecated — \
+                 use OXICLOUD_MAGIC_LINK_INVITE_TTL_HOURS (invitations) \
+                 and OXICLOUD_MAGIC_LINK_LOGIN_TTL_MINUTES (login-via-email)."
+            );
+            config.magic_link.invite_ttl_hours = h;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_INVITE_TTL_HOURS")
+            && let Ok(h) = v.parse::<u64>()
+            && h > 0
+        {
+            config.magic_link.invite_ttl_hours = h;
+        }
+        if let Ok(v) = env::var("OXICLOUD_MAGIC_LINK_LOGIN_TTL_MINUTES")
+            && let Ok(m) = v.parse::<u64>()
+            && m > 0
+        {
+            config.magic_link.login_ttl_minutes = m;
         }
         if let Ok(v) = env::var("OXICLOUD_ALLOW_EXTERNAL_USERS") {
             config.magic_link.allow_external_users = v.parse::<bool>().unwrap_or(true);

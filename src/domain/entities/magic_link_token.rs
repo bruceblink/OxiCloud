@@ -106,22 +106,34 @@ pub struct MagicLinkToken {
     /// schema-level error guarded by the DB CHECK `magic_link_tokens_resource_pair`.
     resource_kind: Option<MagicLinkResourceKind>,
     resource_id: Option<Uuid>,
+    /// Per-request challenge (PR 22). Mirrors the `oxicloud_magic_request`
+    /// cookie set on the originating browser when the user requests a
+    /// login-via-email link. Compared on redemption to bind the
+    /// magic-link to the device that requested it.
+    ///
+    /// `Some` for login-via-email tokens (browser-bound); `None` for
+    /// invitation tokens (cross-device by design — recipient has no
+    /// prior browser context with the server).
+    request_challenge: Option<String>,
 }
 
 impl MagicLinkToken {
     /// Mint a fresh pending token. Generates 32 CSPRNG bytes, encodes them
     /// URL-safe base64 (no padding), and stamps `issued_at = now`,
-    /// `expires_at = now + ttl_hours`.
+    /// `expires_at = now + ttl`.
     ///
     /// `resource` is `Some((kind, id))` for invitations (deep-link to a
     /// specific file/folder) or `None` for login-via-email (lands on
-    /// `/shared-with-me`). The XOR-on-NULL DB CHECK enforces this
-    /// invariant; the entity exposes it as a single `Option` for
-    /// clarity.
+    /// `/shared-with-me` or `/files` depending on `is_external`).
+    ///
+    /// `request_challenge` carries the per-request value mirrored into
+    /// the originating browser's cookie. Pass `Some` for login-via-email
+    /// (browser-bound), `None` for invitations (cross-device).
     pub fn new(
         user_id: Uuid,
-        ttl_hours: u64,
+        ttl: Duration,
         resource: Option<(MagicLinkResourceKind, Uuid)>,
+        request_challenge: Option<String>,
     ) -> Self {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
@@ -139,10 +151,11 @@ impl MagicLinkToken {
             user_id,
             status: MagicLinkStatus::Pending,
             issued_at: now,
-            expires_at: now + Duration::hours(ttl_hours as i64),
+            expires_at: now + ttl,
             used_at: None,
             resource_kind,
             resource_id,
+            request_challenge,
         }
     }
 
@@ -158,6 +171,7 @@ impl MagicLinkToken {
         used_at: Option<DateTime<Utc>>,
         resource_kind: Option<MagicLinkResourceKind>,
         resource_id: Option<Uuid>,
+        request_challenge: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -169,6 +183,7 @@ impl MagicLinkToken {
             used_at,
             resource_kind,
             resource_id,
+            request_challenge,
         }
     }
 
@@ -210,6 +225,14 @@ impl MagicLinkToken {
         self.resource_id
     }
 
+    /// Per-request challenge for browser binding (PR 22). `Some` for
+    /// login-via-email tokens — the redemption endpoint compares this
+    /// with the inbound `oxicloud_magic_request` cookie. `None` for
+    /// invitation tokens — they bypass the cookie check entirely.
+    pub fn request_challenge(&self) -> Option<&str> {
+        self.request_challenge.as_deref()
+    }
+
     // ── Business logic ───────────────────────────────────────────
 
     /// `true` once `expires_at < now`. The status column may still be
@@ -235,7 +258,7 @@ mod tests {
     #[test]
     fn new_token_is_pending_and_within_ttl() {
         let user_id = Uuid::new_v4();
-        let token = MagicLinkToken::new(user_id, 24, None);
+        let token = MagicLinkToken::new(user_id, Duration::hours(24), None, None);
         assert_eq!(token.status(), MagicLinkStatus::Pending);
         assert_eq!(token.user_id(), user_id);
         assert!(token.resource_kind().is_none());
@@ -252,8 +275,9 @@ mod tests {
         let folder_id = Uuid::new_v4();
         let token = MagicLinkToken::new(
             user_id,
-            24,
+            Duration::hours(24),
             Some((MagicLinkResourceKind::Folder, folder_id)),
+            None,
         );
         assert_eq!(token.resource_kind(), Some(MagicLinkResourceKind::Folder));
         assert_eq!(token.resource_id(), Some(folder_id));
@@ -262,8 +286,8 @@ mod tests {
     #[test]
     fn each_token_is_unique() {
         let user_id = Uuid::new_v4();
-        let a = MagicLinkToken::new(user_id, 24, None);
-        let b = MagicLinkToken::new(user_id, 24, None);
+        let a = MagicLinkToken::new(user_id, Duration::hours(24), None, None);
+        let b = MagicLinkToken::new(user_id, Duration::hours(24), None, None);
         assert_ne!(a.token(), b.token());
         assert_ne!(a.id(), b.id());
     }

@@ -63,6 +63,26 @@ pub enum RegisterResult {
     EmailTaken,
 }
 
+/// Outcome of a `redeem_magic_link` call (PR 22).
+///
+/// - `Allowed(redemption)` — the token is valid and the browser
+///   binding either matched or was overridden via the user's
+///   explicit cross-browser confirmation. The token has been
+///   atomically marked used.
+/// - `NeedsCrossBrowserConfirm` — the token carries a
+///   `request_challenge` but the incoming cookie didn't match.
+///   The handler should render a confirmation page; the user
+///   clicks Continue and we re-redeem with `cross_browser_confirmed = true`.
+///   The token is NOT marked used yet — it stays redeemable.
+#[derive(Debug)]
+pub enum MagicLinkRedeemResult {
+    /// Boxed to keep the enum's stack size small — `MagicLinkRedemption`
+    /// is ~350 bytes while `NeedsCrossBrowserConfirm` is zero-sized.
+    /// One redemption per request; the heap indirection is negligible.
+    Allowed(Box<MagicLinkRedemption>),
+    NeedsCrossBrowserConfirm,
+}
+
 #[derive(Debug, Clone)]
 pub struct MagicLinkRedemption {
     pub auth: AuthResponseDto,
@@ -385,7 +405,9 @@ impl AuthApplicationService {
             is_external = false,
             "🛂 user registered",
         );
-        Ok(RegisterResult::Created(Box::new(UserDto::from(created_user))))
+        Ok(RegisterResult::Created(Box::new(UserDto::from(
+            created_user,
+        ))))
     }
 
     /// Create the first admin user during initial system setup.
@@ -627,7 +649,17 @@ impl AuthApplicationService {
     ///
     /// Returns `ServiceUnavailable` (mapped from `NotImplemented`) when
     /// the magic-link repo isn't wired — the handler maps that to HTTP 503.
-    pub async fn redeem_magic_link(&self, token: &str) -> Result<MagicLinkRedemption, DomainError> {
+    ///
+    /// `incoming_challenge` is the value the handler read from the
+    /// browser's `oxicloud_magic_request` cookie (or `None` if absent).
+    /// `cross_browser_confirmed` is `true` when the user has clicked
+    /// through the cross-browser confirmation page (PR 22).
+    pub async fn redeem_magic_link(
+        &self,
+        token: &str,
+        incoming_challenge: Option<&str>,
+        cross_browser_confirmed: bool,
+    ) -> Result<MagicLinkRedeemResult, DomainError> {
         let repo = self.magic_link_repo.as_ref().ok_or_else(|| {
             DomainError::new(
                 ErrorKind::NotImplemented,
@@ -690,6 +722,31 @@ impl AuthApplicationService {
                 "MagicLink",
                 "this magic link has expired",
             ));
+        }
+
+        // PR 22 — browser binding for login-via-email tokens. When the
+        // token carries a `request_challenge`, compare it against the
+        // cookie the handler extracted. Mismatch surfaces as a
+        // cross-browser confirmation page (the handler renders the
+        // HTML); the user clicks Continue and we re-enter with
+        // `cross_browser_confirmed = true`. Invitation tokens have no
+        // challenge — they bypass this check entirely (cross-device by
+        // design). The token is NOT marked used on the prompt path —
+        // it stays redeemable for the confirm round-trip.
+        if let Some(expected) = mlt.request_challenge()
+            && !cross_browser_confirmed
+            && incoming_challenge != Some(expected)
+        {
+            tracing::info!(
+                target: "audit",
+                event = "magic_link.cross_browser_prompt",
+                token_id = %mlt.id(),
+                user_id = %mlt.user_id(),
+                incoming_present = incoming_challenge.is_some(),
+                "🔗 magic-link cross-browser: cookie absent or mismatched for user {}",
+                mlt.user_id(),
+            );
+            return Ok(MagicLinkRedeemResult::NeedsCrossBrowserConfirm);
         }
 
         let consumed = repo.mark_used(mlt.id()).await?;
@@ -759,6 +816,7 @@ impl AuthApplicationService {
             is_external = user.is_external(),
             resource_kind = ?mlt.resource_kind(),
             resource_id = ?mlt.resource_id(),
+            cross_browser_confirmed = cross_browser_confirmed,
         );
 
         let auth = AuthResponseDto {
@@ -769,11 +827,11 @@ impl AuthApplicationService {
             expires_in: self.token_service.refresh_token_expiry_secs(),
         };
 
-        Ok(MagicLinkRedemption {
+        Ok(MagicLinkRedeemResult::Allowed(Box::new(MagicLinkRedemption {
             auth,
             resource_kind: mlt.resource_kind(),
             resource_id: mlt.resource_id(),
-        })
+        })))
     }
 
     /// Verifies username/password credentials without creating a session.

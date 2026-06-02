@@ -239,10 +239,15 @@ impl MagicLinkInviteService {
             Resource::Folder(id) => (MagicLinkResourceKind::Folder, id),
             Resource::File(id) => (MagicLinkResourceKind::File, id),
         };
+        // Invitation tokens are cross-device by design (recipient has
+        // no prior browser context with the server) — no challenge
+        // cookie. Long TTL (default 24h) because recipients may not
+        // check their email for a while.
         let token = MagicLinkToken::new(
             recipient.id(),
-            self.magic_link_cfg.ttl_hours,
+            chrono::Duration::hours(self.magic_link_cfg.invite_ttl_hours as i64),
             Some((kind, resource_id)),
+            None,
         );
         self.magic_link_repo.create(&token).await?;
 
@@ -273,7 +278,7 @@ impl MagicLinkInviteService {
             inviter = inviter_username,
             kind = kind_label,
             link = link,
-            ttl = self.magic_link_cfg.ttl_hours,
+            ttl = self.magic_link_cfg.invite_ttl_hours,
             now = Utc::now().to_rfc3339(),
         );
 
@@ -333,7 +338,21 @@ impl MagicLinkInviteService {
     /// `no_account`, `oidc_user`, `has_password` — so operators can see the truth
     /// while the API stays anti-enumeration-safe. A fourth outcome
     /// `send_failed` is logged at `warn` level when SMTP errors.
-    pub async fn send_login_link(&self, raw_email: &str) -> Result<(), DomainError> {
+    ///
+    /// `request_challenge` is the per-request random value the handler
+    /// already set as the `oxicloud_magic_request` cookie on the
+    /// originating browser. The service mirrors it into the token row;
+    /// the redemption endpoint compares it against the inbound cookie
+    /// to bind the magic-link to the device that requested it.
+    /// Anti-enumeration: the handler passes the same challenge whether
+    /// or not the user exists / is eligible — the token row is just
+    /// not created in those branches, so nothing is leaked by the
+    /// presence or absence of the cookie.
+    pub async fn send_login_link(
+        &self,
+        raw_email: &str,
+        request_challenge: &str,
+    ) -> Result<(), DomainError> {
         let normalised = match normalize_email(raw_email) {
             Ok(n) => n,
             Err(e) => {
@@ -403,9 +422,16 @@ impl MagicLinkInviteService {
             return Ok(());
         }
 
-        // Mint a NULL-resource token. The redemption handler lands
-        // NULL-resource tokens on /#/sharedwithme (see PR 8).
-        let token = MagicLinkToken::new(user.id(), self.magic_link_cfg.ttl_hours, None);
+        // Mint a NULL-resource token bound to the requesting browser
+        // via `request_challenge` (PR 22). Short TTL (default 10 min)
+        // — the user just clicked the button, so a slow click is
+        // almost certainly someone else with access to the inbox.
+        let token = MagicLinkToken::new(
+            user.id(),
+            chrono::Duration::minutes(self.magic_link_cfg.login_ttl_minutes as i64),
+            None,
+            Some(request_challenge.to_string()),
+        );
         self.magic_link_repo.create(&token).await?;
 
         let link = format!(
@@ -418,7 +444,8 @@ impl MagicLinkInviteService {
             "Hello,\n\
              \n\
              Use the link below to sign in to OxiCloud. The link works \
-             once and expires in {ttl} hours.\n\
+             once and expires in {ttl} minutes. Open it on the same \
+             device where you requested it.\n\
              \n\
              {link}\n\
              \n\
@@ -426,7 +453,7 @@ impl MagicLinkInviteService {
              ignore this message — no further action is needed.\n\
              \n\
              — OxiCloud, {now}\n",
-            ttl = self.magic_link_cfg.ttl_hours,
+            ttl = self.magic_link_cfg.login_ttl_minutes,
             link = link,
             now = Utc::now().to_rfc3339(),
         );

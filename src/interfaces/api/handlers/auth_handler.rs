@@ -175,11 +175,14 @@ pub async fn register(
 
     match result {
         RegisterResult::Created(user) => {
-            // Email-only signup: dispatch the welcome magic-link.
-            // Best-effort — SMTP failures don't roll back the user.
+            // Email-only signup: dispatch the welcome magic-link with
+            // a fresh browser-binding challenge (PR 22). Best-effort —
+            // SMTP failures don't roll back the user.
+            let challenge = cookie_auth::generate_magic_request_challenge();
+            let login_ttl_secs = (state.core.config.magic_link.login_ttl_minutes * 60) as i64;
             if was_passwordless
                 && let Some(invite) = state.magic_link_invite_service.as_ref()
-                && let Err(e) = invite.send_login_link(&email).await
+                && let Err(e) = invite.send_login_link(&email, &challenge).await
             {
                 tracing::warn!(
                     target: "audit",
@@ -192,8 +195,19 @@ pub async fn register(
             }
             if smtp_enabled {
                 // Anti-enumeration mode: hide success-vs-collision behind
-                // the uniform "check your email" cover story.
-                Ok(uniform_ok())
+                // the uniform "check your email" cover story. Attach the
+                // browser-binding challenge cookie on every email-only
+                // path — preserves the "did a mail go out" anti-enum
+                // property at the cookie level too.
+                let mut resp = uniform_ok();
+                if was_passwordless {
+                    cookie_auth::append_magic_request_cookie(
+                        resp.headers_mut(),
+                        &challenge,
+                        login_ttl_secs,
+                    );
+                }
+                Ok(resp)
             } else {
                 // Classic mode: clear 201 + UserDto so the frontend can
                 // log the user in directly with the password they just
@@ -1076,11 +1090,28 @@ pub async fn send_magic_link(
         )
     })?;
 
+    // Per-request browser-binding challenge (PR 22). Generated for
+    // every request and set as a cookie on every 200 response —
+    // including the silent-rate-limit paths — so the cookie's
+    // presence is uniform and can't be used as an enumeration oracle.
+    // The corresponding token row only carries the challenge when a
+    // token is actually minted; cookie-without-token simply fails to
+    // match on the eventual redemption.
+    let challenge = cookie_auth::generate_magic_request_challenge();
+    let login_ttl_secs = (state.core.config.magic_link.login_ttl_minutes * 60) as i64;
+    let challenge_for_closure = challenge.clone();
+
     let uniform_ok = || {
         let payload = serde_json::json!({
             "message": "If an account exists for that email, a sign-in link will be sent.",
         });
-        (StatusCode::OK, Json(payload)).into_response()
+        let mut resp = (StatusCode::OK, Json(payload)).into_response();
+        cookie_auth::append_magic_request_cookie(
+            resp.headers_mut(),
+            &challenge_for_closure,
+            login_ttl_secs,
+        );
+        resp
     };
 
     if !is_authenticated {
@@ -1128,7 +1159,7 @@ pub async fn send_magic_link(
     // via the audit channel; we surface only an internal error (DB down,
     // etc.). Anti-enumeration means we always return the same body.
     invite_svc
-        .send_login_link(&body.email)
+        .send_login_link(&body.email, &challenge)
         .await
         .map_err(AppError::from)?;
 

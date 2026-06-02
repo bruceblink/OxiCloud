@@ -24,6 +24,12 @@ pub const REFRESH_COOKIE: &str = "oxicloud_refresh";
 pub const CSRF_COOKIE: &str = "oxicloud_csrf";
 /// Header the frontend must send with the CSRF token value.
 pub const CSRF_HEADER: &str = "x-csrf-token";
+/// Per-request challenge cookie for browser-bound magic-link
+/// redemption (PR 22). Set by `POST /api/auth/magic-link/send` on
+/// the requesting browser; checked by `GET /magic/v1/{token}` against
+/// the token row's `request_challenge` column. Limited to `/magic`
+/// so it only travels back on the redemption endpoint.
+pub const MAGIC_REQUEST_COOKIE: &str = "oxicloud_magic_request";
 
 /// Whether the `Secure` flag should be set on cookies.
 ///
@@ -164,6 +170,47 @@ pub fn append_csrf_cookie(headers: &mut HeaderMap, access_expiry_secs: i64) {
     let token = generate_csrf_token();
     if let Ok(val) = HeaderValue::from_str(&build_csrf_cookie(&token, access_expiry_secs)) {
         headers.append(SET_COOKIE, val);
+    }
+}
+
+/// Generate a per-request challenge for the magic-link browser
+/// binding (PR 22). 128-bit UUIDv4 — same shape as `generate_csrf_token`,
+/// plenty of entropy to make brute-force matching infeasible during
+/// the 10-minute login TTL. The value is set as a cookie on the
+/// originating browser AND mirrored into the token row so the
+/// redemption endpoint can compare them.
+pub fn generate_magic_request_challenge() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// Append the `oxicloud_magic_request` cookie that binds a
+/// login-via-email magic-link to the originating browser (PR 22).
+/// HttpOnly + SameSite=Strict + Path=/magic — only sent back when
+/// the user clicks the redemption link, never on cross-site
+/// navigations. `value` is a random URL-safe string the handler
+/// also mirrors into `auth.magic_link_tokens.request_challenge`.
+pub fn append_magic_request_cookie(headers: &mut HeaderMap, value: &str, max_age_secs: i64) {
+    if let Ok(val) = HeaderValue::from_str(&build_cookie(
+        MAGIC_REQUEST_COOKIE,
+        value,
+        "/magic",
+        max_age_secs,
+        "Strict",
+    )) {
+        headers.append(SET_COOKIE, val);
+    }
+}
+
+/// Clear the `oxicloud_magic_request` cookie after redemption — the
+/// challenge is single-use, so we don't want a stale cookie on the
+/// browser confusing a later flow.
+pub fn append_clear_magic_request_cookie(headers: &mut HeaderMap) {
+    let secure = if cookie_secure() { "; Secure" } else { "" };
+    let val = format!(
+        "{MAGIC_REQUEST_COOKIE}=; HttpOnly; SameSite=Strict; Path=/magic; Max-Age=0{secure}",
+    );
+    if let Ok(hv) = HeaderValue::from_str(&val) {
+        headers.append(SET_COOKIE, hv);
     }
 }
 

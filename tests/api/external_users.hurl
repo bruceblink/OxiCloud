@@ -353,9 +353,24 @@ jsonpath "$.text_body" matches "/magic/v1/[A-Za-z0-9_-]+"
 [Captures]
 login_magic_url: jsonpath "$.text_body" regex "(https?://[^\\s]+/magic/v1/[A-Za-z0-9_-]+)"
 
-# 15c — Redeem the login link. Lands on /#/sharedwithme since the
-#        token has no resource target.
+# 15c-i — PR 22: the token is browser-bound. Hitting the
+#         redemption URL without the matching cookie shows the
+#         cross-browser confirmation page (200 + HTML) rather
+#         than redeeming. Audit-logs `magic_link.cross_browser_prompt`.
+#         The token is NOT marked used on this branch.
 GET {{login_magic_url}}
+
+HTTP 200
+[Asserts]
+header "content-type" startsWith "text/html"
+body contains "different browser"
+
+# 15c-ii — Same token, with `?confirm=1` to acknowledge the
+#          cross-browser redemption. PR 22 audit-logs
+#          `cross_browser_confirmed=true` on the success line.
+#          Lands on /#/sharedwithme since the token has no
+#          resource target.
+GET {{login_magic_url}}?confirm=1
 
 HTTP 302
 [Asserts]

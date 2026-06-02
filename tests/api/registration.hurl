@@ -70,6 +70,12 @@ Content-Type: application/json
 }
 
 HTTP 200
+[Captures]
+# PR 22 — capture the browser-binding cookie so the redemption can
+# replay it. Hurl's automatic cookie jar doesn't reliably attach
+# Path-scoped cookies in this test setup, so we wire it through
+# explicitly via the Set-Cookie header.
+pr18_magic_cookie: header "set-cookie" regex "oxicloud_magic_request=([^;]+)"
 [Asserts]
 jsonpath "$.message" contains "request received"
 
@@ -89,12 +95,26 @@ pr18_magic_url: jsonpath "$.text_body" regex "(https?://[^\\s]+/magic/v1/[A-Za-z
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 5 — Redeem the welcome link. Internal user with no
-#          resource target → lands on `/#/files` (NOT
-#          `/#/sharedwithme`, which is the external-user
-#          landing).
+# Step 5a — Redeem the welcome link WITHOUT the browser-binding
+#           cookie. PR 22 shows the cross-browser confirmation
+#           page (HTTP 200, HTML) rather than redeeming.
 # ─────────────────────────────────────────────────────────────
 GET {{pr18_magic_url}}
+
+HTTP 200
+[Asserts]
+header "content-type" startsWith "text/html"
+body contains "different browser"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 5b — Same link, this time with the matching cookie.
+#           PR 22 binds the magic-link to the requesting browser;
+#           a matching cookie redeems instantly. Internal user
+#           with no resource target → lands on `/#/files`.
+# ─────────────────────────────────────────────────────────────
+GET {{pr18_magic_url}}
+Cookie: oxicloud_magic_request={{pr18_magic_cookie}}
 
 HTTP 302
 [Asserts]
