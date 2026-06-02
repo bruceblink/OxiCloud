@@ -304,15 +304,23 @@ impl AuthApplicationService {
         let password_hash = self.password_hasher.hash_password(&dto.password).await?;
 
         // Create user with the pre-generated hash
-        let user = User::new(dto.username.clone(), dto.email, password_hash, role, quota).map_err(
-            |e| {
-                DomainError::new(
-                    ErrorKind::InvalidInput,
-                    "User",
-                    format!("Error creating user: {}", e),
-                )
-            },
-        )?;
+        let user = User::new(
+            dto.email,
+            Some(dto.username.clone()),
+            Some(password_hash),
+            None,
+            None,
+            role,
+            quota,
+            false,
+        )
+        .map_err(|e| {
+            DomainError::new(
+                ErrorKind::InvalidInput,
+                "User",
+                format!("Error creating user: {}", e),
+            )
+        })?;
 
         // Save user
         let created_user = self.user_storage.create_user(user).await?;
@@ -387,7 +395,17 @@ impl AuthApplicationService {
         let quota = self.capped_quota(&role);
         let password_hash = self.password_hasher.hash_password(&password).await?;
 
-        let user = User::new(username.clone(), email, password_hash, role, quota).map_err(|e| {
+        let user = User::new(
+            email,
+            Some(username.clone()),
+            Some(password_hash),
+            None,
+            None,
+            role,
+            quota,
+            false,
+        )
+        .map_err(|e| {
             DomainError::new(
                 ErrorKind::InvalidInput,
                 "User",
@@ -442,9 +460,9 @@ impl AuthApplicationService {
                 event = "auth.login_rejected",
                 reason = "account_deactivated",
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 "🔐 login rejected: account deactivated for '{}'",
-                user.username(),
+                user.display_for_audit(),
             );
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
@@ -453,10 +471,29 @@ impl AuthApplicationService {
             ));
         }
 
-        // Verify password using the injected hasher
+        // Verify password using the injected hasher. If the user has no
+        // password configured (externals, OIDC-only), short-circuit to
+        // "invalid credentials" — the password-login path never accepts
+        // a NULL hash.
+        let Some(hash) = user.password_hash() else {
+            tracing::info!(
+                target: "audit",
+                event = "auth.login_rejected",
+                reason = "no_password",
+                user_id = %user.id(),
+                username = %user.display_for_audit(),
+                "🔐 login rejected: user has no password configured for '{}'",
+                user.display_for_audit(),
+            );
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Invalid credentials",
+            ));
+        };
         let is_valid = self
             .password_hasher
-            .verify_password(&dto.password, user.password_hash())
+            .verify_password(&dto.password, hash)
             .await?;
 
         if !is_valid {
@@ -465,9 +502,9 @@ impl AuthApplicationService {
                 event = "auth.login_rejected",
                 reason = "bad_password",
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 "🔐 login rejected: bad password for '{}'",
-                user.username(),
+                user.display_for_audit(),
             );
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
@@ -627,9 +664,9 @@ impl AuthApplicationService {
                 reason = "account_deactivated",
                 token_id = %mlt.id(),
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 "🔗 magic-link rejected: account deactivated for '{}'",
-                user.username(),
+                user.display_for_audit(),
             );
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
@@ -662,7 +699,7 @@ impl AuthApplicationService {
             target: "audit",
             event = "magic_link.redeemed",
             user_id = %user.id(),
-            username = %user.username(),
+            username = %user.display_for_audit(),
             is_external = user.is_external(),
             resource_kind = ?mlt.resource_kind(),
             resource_id = ?mlt.resource_id(),
@@ -705,10 +742,14 @@ impl AuthApplicationService {
             ));
         }
 
-        let is_valid = self
-            .password_hasher
-            .verify_password(password, user.password_hash())
-            .await?;
+        let Some(hash) = user.password_hash() else {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Invalid credentials",
+            ));
+        };
+        let is_valid = self.password_hasher.verify_password(password, hash).await?;
 
         if !is_valid {
             return Err(DomainError::new(
@@ -720,7 +761,7 @@ impl AuthApplicationService {
 
         Ok(crate::application::dtos::user_dto::CurrentUser {
             id: user.id(),
-            username: user.username().to_string(),
+            username: user.username().unwrap_or("").to_string(),
             email: user.email().to_string(),
             role: user.role().to_string(),
         })
@@ -874,9 +915,16 @@ impl AuthApplicationService {
         }
 
         // Verify current password using the injected hasher
+        let Some(hash) = user.password_hash() else {
+            return Err(DomainError::new(
+                ErrorKind::AccessDenied,
+                "Auth",
+                "Current password is incorrect",
+            ));
+        };
         let is_valid = self
             .password_hasher
-            .verify_password(&dto.current_password, user.password_hash())
+            .verify_password(&dto.current_password, hash)
             .await?;
 
         if !is_valid {
@@ -901,7 +949,7 @@ impl AuthApplicationService {
             .password_hasher
             .hash_password(&dto.new_password)
             .await?;
-        user.update_password_hash(new_hash);
+        user.update_password_hash(Some(new_hash));
 
         // Save updated user
         self.user_storage.update_user(user.clone()).await?;
@@ -1263,7 +1311,7 @@ impl AuthApplicationService {
 
         // External users never own storage. The DB `users_external_no_storage`
         // CHECK constraint enforces this; setting quota=0 here keeps the
-        // domain consistent and matches `User::new_external`.
+        // domain consistent and matches `User::new(..., is_external = true)`.
         let quota = if is_external {
             0
         } else {
@@ -1275,19 +1323,33 @@ impl AuthApplicationService {
         // magic-link / OIDC, but the DB column is NOT NULL).
         let password_hash = self.password_hasher.hash_password(&dto.password).await?;
 
-        // Create domain entity. External path uses `new_external` so the
-        // is_external flag is set + the EXTERNAL placeholder password
-        // marker is applied for clarity in DB inspection. `new_external`
-        // forces role=User (the admin+external combo was rejected above).
+        // Create domain entity. External users are created with
+        // is_external=true and role forced to User (the admin+external
+        // combo was rejected above). For external users the supplied
+        // password hash is persisted so the audit trail is preserved,
+        // even though they authenticate via magic-link / OIDC.
         let user = if is_external {
-            User::new_external(dto.username.clone(), email).map(|mut u| {
-                // The hashed password from the request is unused for auth
-                // but is persisted so audit-trail integrity is preserved.
-                u.update_password_hash(password_hash);
-                u
-            })
+            User::new(
+                email,
+                Some(dto.username.clone()),
+                Some(password_hash),
+                None,
+                None,
+                UserRole::User,
+                0,
+                true,
+            )
         } else {
-            User::new(dto.username.clone(), email, password_hash, role, quota)
+            User::new(
+                email,
+                Some(dto.username.clone()),
+                Some(password_hash),
+                None,
+                None,
+                role,
+                quota,
+                false,
+            )
         }
         .map_err(|e| {
             DomainError::new(
@@ -1375,7 +1437,11 @@ impl AuthApplicationService {
     /// `Err`, the transaction rolls back and the user remains intact.
     pub async fn delete_user_admin(&self, user_id: Uuid) -> Result<(), DomainError> {
         let user = self.user_storage.get_user_by_id(user_id).await?;
-        tracing::info!("Admin deleting user: {} ({})", user.username(), user_id);
+        tracing::info!(
+            "Admin deleting user: {} ({})",
+            user.display_for_audit(),
+            user_id
+        );
 
         let mut tx = self
             .user_storage
@@ -1783,13 +1849,15 @@ impl AuthApplicationService {
                     username = format!("{}_{}", &username[..username.len().min(27)], suffix);
                 }
 
-                let mut new_user = User::new_oidc(
-                    username.clone(),
+                let mut new_user = User::new(
                     oidc_email,
+                    Some(username.clone()),
+                    None,
+                    Some(provider_name.clone()),
+                    Some(claims.sub.clone()),
                     role,
                     quota,
-                    provider_name.clone(),
-                    claims.sub.clone(),
+                    false,
                 )
                 .map_err(|e| {
                     DomainError::new(
@@ -1829,13 +1897,13 @@ impl AuthApplicationService {
             // Nextcloud path: return user info so the handler can mint an
             // app-password and complete the NC login flow.
             tracing::info!(
-                user = %user.username(),
+                user = %user.display_for_audit(),
                 "OIDC login successful for Nextcloud Login Flow v2"
             );
             return Ok(OidcCallbackResult::NextcloudLogin {
                 nc_flow_token: nc_token,
                 user_id: user.id(),
-                username: user.username().to_string(),
+                username: user.username().unwrap_or("").to_string(),
             });
         }
 

@@ -60,6 +60,33 @@ async fn create_app_password(
         return Err(err);
     }
 
+    // Require a claimed username. NextCloud Basic Auth resolves users by
+    // username; an app password is unusable without one. UserDto carries
+    // an empty string when the underlying `users.username` is NULL — the
+    // entity rejects empty strings on construction, so empty here is an
+    // unambiguous signal that the column is NULL.
+    if let Some(auth_svc) = state.auth_service.as_ref() {
+        let user_dto = auth_svc
+            .auth_application_service
+            .get_user_by_id(user.id)
+            .await
+            .map_err(AppError::from)?;
+        if user_dto.username.is_none() {
+            tracing::info!(
+                target: "audit",
+                event = "auth.app_password_create_rejected",
+                reason = "no_username",
+                caller_id = %user.id,
+                "App-password creation requires a claimed username"
+            );
+            return Err(AppError::new(
+                axum::http::StatusCode::CONFLICT,
+                "Claim a username on your profile before creating an app password.",
+                "UsernameRequired",
+            ));
+        }
+    }
+
     let service = state
         .app_password_service
         .as_ref()

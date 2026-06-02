@@ -212,7 +212,9 @@ HTTP 403
 
 # 11c — /api/users/{id}: bob CAN look up his own profile (self-lookup
 #        is the first allow rule) so the SharedWithMe view can show
-#        his own avatar in the user menu.
+#        his own avatar in the user menu. After PR 16 externals have
+#        NULL username (the field is omitted from JSON when None) —
+#        the email field is the identity.
 GET {{base_url}}/api/users/{{bob_user_id}}
 Authorization: Bearer {{bob_access_token}}
 
@@ -220,6 +222,8 @@ HTTP 200
 [Asserts]
 jsonpath "$.id" == "{{bob_user_id}}"
 jsonpath "$.is_external" == true
+jsonpath "$.email" == "bob@externalcompany.com"
+jsonpath "$.username" not exists
 
 # 11d — bob CAN look up Alice (his granter) — shared-grant relationship
 #        lets the external recipient resolve the sharer's display name +
@@ -285,7 +289,8 @@ HTTP 403
 # ─────────────────────────────────────────────────────────────
 # Step 12 — /api/users/{id} happy path (Alice → Bob).
 #           Visibility rule: they share a grant, so Alice sees
-#           Bob's profile (with is_external=true).
+#           Bob's profile (with is_external=true). Bob's username
+#           is NULL post PR 16 (externals don't carry a handle).
 # ─────────────────────────────────────────────────────────────
 GET {{base_url}}/api/users/{{bob_user_id}}
 Authorization: Bearer {{alice_token}}
@@ -294,6 +299,8 @@ HTTP 200
 [Asserts]
 jsonpath "$.id" == "{{bob_user_id}}"
 jsonpath "$.is_external" == true
+jsonpath "$.email" == "bob@externalcompany.com"
+jsonpath "$.username" not exists
 
 
 # ─────────────────────────────────────────────────────────────

@@ -878,7 +878,11 @@ pub async fn oidc_exchange(
 
     tracing::info!(
         "OIDC token exchange successful for user: {}",
-        auth_response.user.username
+        auth_response
+            .user
+            .username
+            .as_deref()
+            .unwrap_or(&auth_response.user.email)
     );
 
     // Set HttpOnly cookies for the browser

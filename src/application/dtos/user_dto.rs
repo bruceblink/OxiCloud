@@ -7,7 +7,13 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserDto {
     pub id: String,
-    pub username: String,
+    /// Optional handle. `None` for users who have not claimed one
+    /// (externals, fresh email-only signups). Frontend display callers
+    /// should walk `username → given/family → email` as their fallback
+    /// chain. Omitted from JSON when None (consistent with the existing
+    /// given_name / family_name fields).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
     pub email: String,
     pub role: String,
     pub storage_quota_bytes: i64,
@@ -40,7 +46,7 @@ impl From<User> for UserDto {
     fn from(user: User) -> Self {
         Self {
             id: user.id().to_string(),
-            username: user.username().to_string(),
+            username: user.username().map(str::to_string),
             email: user.email().to_string(),
             role: format!("{}", user.role()),
             storage_quota_bytes: user.storage_quota_bytes(),

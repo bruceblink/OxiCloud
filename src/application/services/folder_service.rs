@@ -621,7 +621,7 @@ impl FolderService {
     pub async fn ensure_home_folder(
         &self,
         user_id: Uuid,
-        username: &str,
+        username: Option<&str>,
     ) -> Result<bool, DomainError> {
         let existing = self
             .folder_storage
@@ -637,7 +637,10 @@ impl FolderService {
             return Ok(false);
         }
 
-        let folder_name = format!("My Folder - {}", username);
+        let folder_name = match username {
+            Some(u) => format!("My Folder - {}", u),
+            None => format!("My Folder - {}", user_id),
+        };
         self.folder_storage
             .create_home_folder(user_id, folder_name.clone())
             .await

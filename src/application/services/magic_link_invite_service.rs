@@ -33,7 +33,7 @@ use crate::application::services::user_lifecycle_service::UserLifecycleService;
 use crate::common::config::MagicLinkConfig;
 use crate::common::errors::{DomainError, ErrorKind};
 use crate::domain::entities::magic_link_token::{MagicLinkResourceKind, MagicLinkToken};
-use crate::domain::entities::user::User;
+use crate::domain::entities::user::{User, UserRole};
 use crate::domain::repositories::magic_link_token_repository::MagicLinkTokenRepository;
 use crate::domain::repositories::user_repository::{UserRepository, UserRepositoryError};
 use crate::domain::services::authorization::{Resource, ResourceKind};
@@ -119,11 +119,19 @@ impl MagicLinkInviteService {
             ));
         }
 
-        // username == normalised email for external users. The user
-        // entity's `validate_username` was widened to 254 chars + email
-        // shape in PR 6 specifically to allow this.
-        let user = User::new_external(normalised_email.to_string(), normalised_email.to_string())
-            .map_err(|e| {
+        // External users are created without a username or password.
+        // `password_hash IS NULL` is the canonical no-password marker.
+        let user = User::new(
+            normalised_email.to_string(),
+            None,
+            None,
+            None,
+            None,
+            UserRole::User,
+            0,
+            true,
+        )
+        .map_err(|e| {
             DomainError::new(
                 ErrorKind::InvalidInput,
                 "MagicLinkInvite",
@@ -308,10 +316,10 @@ impl MagicLinkInviteService {
                 event = "auth.magic_link_send",
                 reason = "has_credential",
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 email = %normalised,
                 "🔗 login-link suppressed: '{}' has another login credential",
-                user.username(),
+                user.display_for_audit(),
             );
             return Ok(());
         }
@@ -322,10 +330,10 @@ impl MagicLinkInviteService {
                 event = "auth.magic_link_send",
                 reason = "account_deactivated",
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 email = %normalised,
                 "🔗 login-link suppressed: account deactivated for '{}'",
-                user.username(),
+                user.display_for_audit(),
             );
             return Ok(());
         }
@@ -372,7 +380,7 @@ impl MagicLinkInviteService {
                     event = "auth.magic_link_send",
                     reason = "sent",
                     user_id = %user.id(),
-                    username = %user.username(),
+                    username = %user.display_for_audit(),
                     email = %normalised,
                     smtp_code = outcome.code,
                     smtp_message = %outcome.message,

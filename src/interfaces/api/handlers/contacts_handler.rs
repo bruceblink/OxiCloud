@@ -188,11 +188,13 @@ fn if_match_passes(if_match: Option<&str>, stored_etag: &str) -> bool {
 /// they're present, prefer a "First Last" full name; otherwise fall
 /// back to the username (which is always present).
 fn user_to_contact(user: UserDto) -> ContactDto {
+    // Display fallback chain: given+family name → username → email.
+    // Username is `Option<String>` post PR 16; externals start with None.
     let full_name = match (user.given_name.as_deref(), user.family_name.as_deref()) {
         (Some(g), Some(f)) => format!("{g} {f}"),
         (Some(g), None) => g.to_string(),
         (None, Some(f)) => f.to_string(),
-        (None, None) => user.username.clone(),
+        (None, None) => user.username.clone().unwrap_or_else(|| user.email.clone()),
     };
     ContactDto {
         id: user.id.clone(),

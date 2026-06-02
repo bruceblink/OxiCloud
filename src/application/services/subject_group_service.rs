@@ -270,7 +270,7 @@ impl SubjectGroupService {
         // recipients; placing one in a subject group would let any later
         // group-grant on an internal resource silently leak access.
         // Mirrors the no-external-admins enforcement style in
-        // `User::new_external`.
+        // `User::new(..., is_external = true)`.
         if let GroupMember::User(uid) = member {
             match UserRepository::get_user_by_id(&*self.user_storage, uid).await {
                 Ok(user) if user.is_external() => {
@@ -588,11 +588,10 @@ mod integration_tests {
                  id, username, email, password_hash, role,
                  storage_quota_bytes, storage_used_bytes,
                  created_at, updated_at, active, is_external
-             ) VALUES ($1, $2, $3, '__EXTERNAL_NO_PASSWORD__', 'user'::auth.userrole,
+             ) VALUES ($1, NULL, $2, NULL, 'user'::auth.userrole,
                        0, 0, NOW(), NOW(), TRUE, TRUE)",
         )
         .bind(external_id)
-        .bind(format!("ext-{}@example.com", &external_id.to_string()[..8]))
         .bind(format!("ext-{}@example.com", &external_id.to_string()[..8]))
         .execute(svc.pool.as_ref())
         .await

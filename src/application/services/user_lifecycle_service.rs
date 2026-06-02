@@ -151,7 +151,7 @@ impl UserLifecycleHook for AuditLifecycleHook {
             target: "audit",
             event = "user.created",
             user_id = %user.id(),
-            username = %user.username(),
+            username = %user.display_for_audit(),
             is_external = user.is_external(),
         );
         Ok(())
@@ -162,7 +162,7 @@ impl UserLifecycleHook for AuditLifecycleHook {
             target: "audit",
             event = "user.login",
             user_id = %user.id(),
-            username = %user.username(),
+            username = %user.display_for_audit(),
             is_external = user.is_external(),
             first_login = user.last_login_at().is_none(),
         );
@@ -174,7 +174,7 @@ impl UserLifecycleHook for AuditLifecycleHook {
             target: "audit",
             event = "user.logout",
             user_id = %user.id(),
-            username = %user.username(),
+            username = %user.display_for_audit(),
             is_external = user.is_external(),
             reason = ?reason,
         );
@@ -193,7 +193,7 @@ impl UserLifecycleHook for AuditLifecycleHook {
             target: "audit",
             event = "user.deleted",
             user_id = %user.id(),
-            username = %user.username(),
+            username = %user.display_for_audit(),
             is_external = user.is_external(),
             mode = ?mode,
         );
@@ -272,7 +272,7 @@ impl UserLifecycleHook for SessionRevocationLifecycleHook {
             target: "audit",
             event = "user.sessions_revoked_on_delete",
             user_id = %user.id(),
-            username = %user.username(),
+            username = %user.display_for_audit(),
             mode = ?mode,
             count = count,
         );

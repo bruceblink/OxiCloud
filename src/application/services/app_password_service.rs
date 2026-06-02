@@ -132,7 +132,7 @@ impl AppPasswordService {
 
         // Fetch user for the username (needed for Basic Auth instructions)
         let user = self.user_repo.get_user_by_id(user_id).await?;
-        let username = user.username().to_string();
+        let username = user.username().unwrap_or("").to_string();
 
         // Generate the plain-text token
         let plain_token = Self::generate_token();
@@ -349,7 +349,7 @@ impl AppPasswordService {
 
                 let result = CachedBasicAuthResult {
                     user_id: user.id(),
-                    username: user.username().to_string(),
+                    username: user.username().unwrap_or("").to_string(),
                     email: user.email().to_string(),
                     role: user.role().to_string(),
                 };

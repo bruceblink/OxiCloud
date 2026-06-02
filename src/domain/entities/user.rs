@@ -23,9 +23,19 @@ impl std::fmt::Display for UserRole {
 #[derive(Debug, Clone)]
 pub struct User {
     id: Uuid,
-    username: String,
+    /// Optional handle (2-64 chars, no `@`). NULL for users created via
+    /// email-invitation (`is_external = true`) and for users who have
+    /// not yet claimed a handle (PR-18 email-only signups). When set, it
+    /// must satisfy `validate_username` and must NOT contain `@` —
+    /// keeping the username and email namespaces provably disjoint.
+    username: Option<String>,
     email: String,
-    password_hash: String,
+    /// Optional Argon2 password hash. NULL when the user has no password
+    /// (externals, OIDC-only users, email-only signups awaiting their
+    /// welcome magic-link). After PR 16 this column carries no sentinel
+    /// strings — `is_some()` means "real argon2 hash"; `None` means "no
+    /// password configured".
+    password_hash: Option<String>,
     role: UserRole,
     storage_quota_bytes: i64,
     storage_used_bytes: i64,
@@ -54,37 +64,70 @@ pub struct User {
 }
 
 impl User {
-    /// Create a new user with a pre-hashed password.
+    /// Create a new user.
     ///
-    /// The password hashing should be done externally using PasswordHasherPort
-    /// to maintain clean architecture and keep cryptographic dependencies
-    /// out of the domain layer.
+    /// One unified constructor for every kind of user (internal, OIDC-linked,
+    /// external). The credential slots and the `is_external` marker are all
+    /// caller-controlled — what makes a user "OIDC" is `oidc_subject =
+    /// Some(_)`, what makes them "external" is `is_external = true`. There
+    /// are no hidden sentinel values; an absent credential is `None`.
     ///
     /// # Arguments
-    /// * `username` - User's username (3-254 characters; may be an email)
-    /// * `email` - User's email address
-    /// * `password_hash` - Pre-hashed password (from PasswordHasherPort)
-    /// * `role` - User's role
-    /// * `storage_quota_bytes` - Storage quota in bytes
+    /// * `email` — required, must satisfy `validate_email`
+    /// * `username` — optional handle (2-64 chars, no `@`)
+    /// * `password_hash` — pre-hashed via PasswordHasherPort, or `None` if
+    ///   the user has no password yet (magic-link or OIDC bootstrap)
+    /// * `oidc_provider`, `oidc_subject` — both `Some` when the user is
+    ///   linked to an external IdP, both `None` otherwise
+    /// * `role` — `Admin` is rejected when `is_external = true` (mirrors the
+    ///   `users_external_not_admin` DB CHECK constraint)
+    /// * `storage_quota_bytes` — caller-set; external callers should pass 0
+    ///   to satisfy the `users_external_no_storage` invariant
+    /// * `is_external` — TRUE for grant-only recipients (magic-link, OCM)
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        username: String,
         email: String,
-        password_hash: String,
+        username: Option<String>,
+        password_hash: Option<String>,
+        oidc_provider: Option<String>,
+        oidc_subject: Option<String>,
         role: UserRole,
         storage_quota_bytes: i64,
+        is_external: bool,
     ) -> UserResult<Self> {
-        // Validations
-        Self::validate_username(&username)?;
         Self::validate_email(&email)?;
-
-        if password_hash.is_empty() {
+        if let Some(ref u) = username {
+            Self::validate_username(u)?;
+        }
+        if let Some(ref h) = password_hash
+            && h.is_empty()
+        {
             return Err(UserError::InvalidPassword(
                 "Password hash cannot be empty".to_string(),
             ));
         }
+        // Schema-level CHECKs are mirrored at the entity layer so callers
+        // get a typed error instead of an opaque DB rejection.
+        if is_external && matches!(role, UserRole::Admin) {
+            return Err(UserError::ValidationError(
+                "External users cannot hold the admin role".to_string(),
+            ));
+        }
+        if is_external && storage_quota_bytes != 0 {
+            return Err(UserError::ValidationError(
+                "External users must have storage_quota_bytes = 0".to_string(),
+            ));
+        }
+        // OIDC linkage is all-or-nothing: both provider and subject set,
+        // or neither. The DB has a UNIQUE index on (provider, subject)
+        // WHERE both non-NULL; partial state would corrupt that.
+        if oidc_provider.is_some() != oidc_subject.is_some() {
+            return Err(UserError::ValidationError(
+                "oidc_provider and oidc_subject must both be set or both be None".to_string(),
+            ));
+        }
 
         let now = Utc::now();
-
         Ok(Self {
             id: Uuid::new_v4(),
             username,
@@ -97,86 +140,10 @@ impl User {
             updated_at: now,
             last_login_at: None,
             active: true,
-            oidc_provider: None,
-            oidc_subject: None,
+            oidc_provider,
+            oidc_subject,
             image: None,
-            is_external: false,
-            given_name: None,
-            family_name: None,
-        })
-    }
-
-    /// Create a new OIDC-authenticated user (no password required).
-    pub fn new_oidc(
-        username: String,
-        email: String,
-        role: UserRole,
-        storage_quota_bytes: i64,
-        oidc_provider: String,
-        oidc_subject: String,
-    ) -> UserResult<Self> {
-        Self::validate_username(&username)?;
-        Self::validate_email(&email)?;
-        let now = Utc::now();
-        Ok(Self {
-            id: Uuid::new_v4(),
-            username,
-            email,
-            password_hash: "__OIDC_NO_PASSWORD__".to_string(),
-            role,
-            storage_quota_bytes,
-            storage_used_bytes: 0,
-            created_at: now,
-            updated_at: now,
-            last_login_at: None,
-            active: true,
-            oidc_provider: Some(oidc_provider),
-            oidc_subject: Some(oidc_subject),
-            image: None,
-            is_external: false,
-            given_name: None,
-            family_name: None,
-        })
-    }
-
-    /// Create a new external user — magic-link / OIDC-only / OCM-federated
-    /// recipient who does NOT own storage. The `CHECK (NOT is_external OR
-    /// storage_used_bytes = 0)` DB constraint enforces the no-storage rule
-    /// at the schema level.
-    ///
-    /// **External users are always `UserRole::User`** — there is no role
-    /// parameter because admin + external is an explicitly forbidden
-    /// combination enforced by the `users_external_not_admin` DB CHECK
-    /// constraint. Granting admin to a federated principal would let
-    /// external identity providers indirectly manage the local instance.
-    /// To make an external user an admin: first convert them to internal
-    /// (`UPDATE auth.users SET is_external = FALSE`), then update role.
-    /// The two-step process is intentional friction.
-    ///
-    /// Quota is set to 0 because external users can't upload content
-    /// into any folder they own (they have no folder). They can only
-    /// act on grants the resource owner provides — which counts against
-    /// the owner's quota, not theirs.
-    pub fn new_external(username: String, email: String) -> UserResult<Self> {
-        Self::validate_username(&username)?;
-        Self::validate_email(&email)?;
-        let now = Utc::now();
-        Ok(Self {
-            id: Uuid::new_v4(),
-            username,
-            email,
-            password_hash: "__EXTERNAL_NO_PASSWORD__".to_string(),
-            role: UserRole::User,
-            storage_quota_bytes: 0,
-            storage_used_bytes: 0,
-            created_at: now,
-            updated_at: now,
-            last_login_at: None,
-            active: true,
-            oidc_provider: None,
-            oidc_subject: None,
-            image: None,
-            is_external: true,
+            is_external,
             given_name: None,
             family_name: None,
         })
@@ -185,9 +152,9 @@ impl User {
     #[allow(clippy::too_many_arguments)]
     pub fn from_data(
         id: Uuid,
-        username: String,
+        username: Option<String>,
         email: String,
-        password_hash: String,
+        password_hash: Option<String>,
         role: UserRole,
         storage_quota_bytes: i64,
         storage_used_bytes: i64,
@@ -226,9 +193,9 @@ impl User {
     #[allow(clippy::too_many_arguments)]
     pub fn from_data_full(
         id: Uuid,
-        username: String,
+        username: Option<String>,
         email: String,
-        password_hash: String,
+        password_hash: Option<String>,
         role: UserRole,
         storage_quota_bytes: i64,
         storage_used_bytes: i64,
@@ -269,8 +236,12 @@ impl User {
         self.id
     }
 
-    pub fn username(&self) -> &str {
-        &self.username
+    /// The user's chosen handle. `None` for users who have not claimed
+    /// one (externals, fresh email-only signups). Display callers should
+    /// fall back through `given_name`/`family_name` to `email` when this
+    /// is `None`.
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
     }
 
     pub fn email(&self) -> &str {
@@ -305,8 +276,31 @@ impl User {
         self.active
     }
 
-    pub fn password_hash(&self) -> &str {
-        &self.password_hash
+    /// The Argon2 password hash, or `None` when the user has no password
+    /// configured (externals, OIDC-only users, post-PR-18 email-only
+    /// signups). `verify_password` callers must short-circuit to
+    /// "invalid credentials" when this is `None`.
+    pub fn password_hash(&self) -> Option<&str> {
+        self.password_hash.as_deref()
+    }
+
+    /// Convenience: does the user have a real password configured?
+    pub fn has_password(&self) -> bool {
+        self.password_hash.is_some()
+    }
+
+    /// Best-effort label for audit-log interpolation. Returns the
+    /// username when set; falls back to the user_id otherwise. Always
+    /// implements `Display` (returns `String`) so audit lines can stay
+    /// `username = %user.display_for_audit()` regardless of whether the
+    /// user has claimed a handle. Reserve this for `target: "audit"`
+    /// lines — user-facing display callers should walk the
+    /// `username → given/family → email` fallback chain themselves.
+    pub fn display_for_audit(&self) -> String {
+        match &self.username {
+            Some(u) => u.clone(),
+            None => self.id.to_string(),
+        }
     }
 
     pub fn oidc_provider(&self) -> Option<&str> {
@@ -352,17 +346,27 @@ impl User {
         self.updated_at = Utc::now();
     }
 
-    /// Mutate the username after creation. Runs the same validation as the
+    /// Claim or change the username. Runs the same validation as the
     /// constructor — callers must still ensure uniqueness at the repo
     /// level. Bumps `updated_at`. Used by the post-create profile-edit
-    /// endpoint so a user invited with `username = email` can switch to a
-    /// shorter handle later. The home folder name is NOT renamed: it was
-    /// display text at creation; the folder is owned by `user_id`.
+    /// endpoint so a user who started with `None` can claim a handle
+    /// later, or change to a different one. The home folder name is NOT
+    /// renamed: it was display text at creation; the folder is owned
+    /// by `user_id`.
     pub fn set_username(&mut self, new_username: String) -> UserResult<()> {
         Self::validate_username(&new_username)?;
-        self.username = new_username;
+        self.username = Some(new_username);
         self.updated_at = Utc::now();
         Ok(())
+    }
+
+    /// Unset the username (return to `None`). Use sparingly — most
+    /// users keep their handle once claimed. Mainly here so admin
+    /// tooling can clear a problematic handle without deleting the
+    /// account.
+    pub fn clear_username(&mut self) {
+        self.username = None;
+        self.updated_at = Utc::now();
     }
 
     /// Returns true if this is an OIDC-only user (no password)
@@ -371,25 +375,19 @@ impl User {
     }
 
     /// Returns true iff this user has any non-magic-link authentication
-    /// method available — either a real (non-placeholder) password hash,
-    /// or a linked OIDC subject. Magic-link auto-authentication is only
-    /// offered for accounts without any of these.
-    ///
-    /// The placeholder-string approach is a known smell; a future
-    /// `auth.user_auth_methods` side-table will replace it. Migrating that
-    /// refactor touches only this method's body — every magic-link
-    /// eligibility check goes through here.
+    /// method available — either a real password hash, or a linked OIDC
+    /// subject. Magic-link eligibility for "no other credential" mode is
+    /// the negation of this; the `OXICLOUD_MAGIC_LINK_OPEN_TO_PASSWORD_USERS`
+    /// flag widens the policy at the service layer (`magic_link_eligibility`).
     pub fn has_login_credential(&self) -> bool {
-        let has_password = self.password_hash != "__EXTERNAL_NO_PASSWORD__"
-            && self.password_hash != "__OIDC_NO_PASSWORD__";
-        has_password || self.oidc_subject.is_some()
+        self.password_hash.is_some() || self.oidc_subject.is_some()
     }
 
-    /// Update the password hash.
-    ///
-    /// The new password should be hashed externally using PasswordHasherPort
-    /// before calling this method.
-    pub fn update_password_hash(&mut self, new_hash: String) {
+    /// Set the password hash. The new password must be hashed externally
+    /// via `PasswordHasherPort` before calling this. Passing `None`
+    /// clears the password (e.g. when a user opts back into magic-link-only
+    /// auth).
+    pub fn update_password_hash(&mut self, new_hash: Option<String>) {
         self.password_hash = new_hash;
         self.updated_at = Utc::now();
     }
@@ -421,39 +419,26 @@ impl User {
 
     // ── Shared validation helpers ──────────────────────────────────────
 
-    /// Usernames must be 3-254 chars. Two accepted shapes:
-    ///
-    /// - **Traditional**: ASCII alphanumerics, hyphens, underscores, and
-    ///   dots. No leading/trailing dot or hyphen. Capped at 254 chars
-    ///   (well above the historical 32-char limit, but still safe — the
-    ///   real upper bound is RFC 5321's email cap for the email shape).
-    /// - **Email-as-username**: must contain `@` and pass `validate_email`.
-    ///   External users created from invite-by-email get their normalized
-    ///   email as username; internal users may opt into this if they
-    ///   prefer their email as their handle.
-    ///
-    /// Both shapes prevent XSS payloads like `<img/src=x>` from being
-    /// stored as usernames — the traditional shape via the explicit
-    /// character set, the email shape via `validate_email`'s rejection of
-    /// `<`, `>`, quotes, whitespace, etc.
+    /// Usernames are 2-64 chars of `[A-Za-z0-9._-]`. The `@` character is
+    /// explicitly forbidden — keeping the username and email namespaces
+    /// provably disjoint is what closes the cross-collision attack class
+    /// described in the auth-simplification plan (a user can never claim
+    /// a handle that shadows another user's email). No leading/trailing
+    /// dot or hyphen. The character set also prevents XSS payloads from
+    /// being stored as usernames.
     fn validate_username(username: &str) -> UserResult<()> {
-        if username.len() < 3 || username.len() > 254 {
+        let len = username.chars().count();
+        if !(2..=64).contains(&len) {
             return Err(UserError::InvalidUsername(
-                "Username must be between 3 and 254 characters".to_string(),
+                "Username must be between 2 and 64 characters".to_string(),
             ));
         }
-
         if username.contains('@') {
-            // Email shape — defer to the email validator (which checks the
-            // forbidden-character set and the local-part / domain structure).
-            return Self::validate_email(username).map_err(|e| match e {
-                UserError::ValidationError(m) => {
-                    UserError::InvalidUsername(format!("Invalid email-as-username: {}", m))
-                }
-                other => other,
-            });
+            return Err(UserError::InvalidUsername(
+                "Username must not contain '@' — use the email field for email addresses"
+                    .to_string(),
+            ));
         }
-
         if !username
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
@@ -463,7 +448,6 @@ impl User {
                     .to_string(),
             ));
         }
-        // Disallow leading/trailing dots or hyphens
         if username.starts_with('.')
             || username.starts_with('-')
             || username.ends_with('.')

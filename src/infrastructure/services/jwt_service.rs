@@ -156,7 +156,7 @@ impl TokenServicePort for JwtTokenService {
         // Log information for debugging
         tracing::debug!(
             "Generating token for user: {}, id: {}, role: {}",
-            user.username(),
+            user.display_for_audit(),
             user.id(),
             user.role()
         );
@@ -166,7 +166,7 @@ impl TokenServicePort for JwtTokenService {
             exp: now + self.access_token_expiry,
             iat: now,
             jti: Uuid::new_v4().to_string(),
-            username: user.username().to_string(),
+            username: user.username().unwrap_or("").to_string(),
             email: user.email().to_string(),
             role: format!("{}", user.role()),
         };
@@ -267,9 +267,9 @@ mod tests {
     fn create_test_user() -> User {
         User::from_data(
             Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            "testuser".to_string(),
+            Some("testuser".to_string()),
             "test@example.com".to_string(),
-            "hashed_password".to_string(),
+            Some("hashed_password".to_string()),
             UserRole::User,
             1024 * 1024 * 1024, // 1GB
             0,
@@ -297,7 +297,7 @@ mod tests {
             .validate_token(&token)
             .expect("Should validate token");
         assert_eq!(claims.sub, user.id().to_string());
-        assert_eq!(claims.username, user.username());
+        assert_eq!(Some(claims.username.as_str()), user.username());
         assert_eq!(claims.email, user.email());
     }
 

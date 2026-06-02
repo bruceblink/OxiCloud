@@ -85,7 +85,7 @@ impl UserLifecycleHook for ExternalIdentityLifecycleHook {
                 target: "audit",
                 event = "external_user.created",
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 email = %user.email(),
             );
         }
@@ -98,7 +98,7 @@ impl UserLifecycleHook for ExternalIdentityLifecycleHook {
                 target: "audit",
                 event = "external_user.login",
                 user_id = %user.id(),
-                username = %user.username(),
+                username = %user.display_for_audit(),
                 first_login = user.last_login_at().is_none(),
             );
         }

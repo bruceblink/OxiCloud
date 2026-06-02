@@ -271,19 +271,26 @@ pub async fn handle_sharees_search(
         .await
         .unwrap_or_default();
 
+    // Skip users with no claimed username — NC sharees autocomplete relies
+    // on a username being typeable; users still on the email-only signup
+    // path can't be addressed here. Also skip self (don't suggest sharing
+    // with yourself).
     let matches: Vec<serde_json::Value> = users
         .into_iter()
-        .filter(|u| u.username != user.username) // Don't suggest self
-        .take(25)
-        .map(|u| {
-            json!({
-                "label": u.username,
+        .filter_map(|u| {
+            let handle = u.username.clone()?;
+            if handle == user.username {
+                return None;
+            }
+            Some(json!({
+                "label": handle,
                 "value": {
                     "shareType": 0,
-                    "shareWith": u.username
+                    "shareWith": handle,
                 }
-            })
+            }))
         })
+        .take(25)
         .collect();
 
     sharees_response(matches).into_response()

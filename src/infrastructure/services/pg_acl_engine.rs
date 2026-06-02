@@ -959,7 +959,7 @@ impl AuthorizationEngine for PgAclEngine {
                     )
                     SELECT ag.resource_type, ag.resource_id, rp.first_shared_at,
                            ag.subject_type, ag.subject_id,
-                           COALESCE(u.username, sg.name::text, sh.item_name, fi.name, fld.name, ag.subject_id::text) AS subject_display,
+                           COALESCE(u.username, u.email, sg.name::text, sh.item_name, fi.name, fld.name, ag.subject_id::text) AS subject_display,
                            ag.id AS grant_id, ag.granted_at, ag.expires_at, ag.permission,
                            rp.sort_str, rp.sort_int,
                            (sh.password_hash IS NOT NULL) AS has_password
@@ -983,7 +983,7 @@ impl AuthorizationEngine for PgAclEngine {
                                  WHEN ag.subject_type = 'token' AND sh.password_hash IS NOT NULL THEN 2
                                  ELSE 3
                              END ASC,
-                             LOWER(COALESCE(u.username, sg.name::text, sh.item_name, ag.subject_id::text)) ASC,
+                             LOWER(COALESCE(u.username, u.email, sg.name::text, sh.item_name, ag.subject_id::text)) ASC,
                              ag.granted_at"#
                 )
             }
@@ -1023,7 +1023,7 @@ impl AuthorizationEngine for PgAclEngine {
                             ag.resource_id,
                             ag.subject_type,
                             ag.subject_id,
-                            MAX(COALESCE(u.username, sg.name::text, sh.item_name, ag.subject_id::text)) AS subject_display,
+                            MAX(COALESCE(u.username, u.email, sg.name::text, sh.item_name, ag.subject_id::text)) AS subject_display,
                             BOOL_OR(sh.password_hash IS NOT NULL) AS has_password,
                             MAX(CASE
                                 WHEN ag.subject_type = 'group' THEN 0
@@ -1108,7 +1108,7 @@ impl AuthorizationEngine for PgAclEngine {
                             ag.resource_id,
                             ag.subject_type,
                             ag.subject_id,
-                            MAX(COALESCE(u.username, sh.item_name, ag.subject_id::text)) AS subject_display,
+                            MAX(COALESCE(u.username, u.email, sh.item_name, ag.subject_id::text)) AS subject_display,
                             BOOL_OR(sh.password_hash IS NOT NULL) AS has_password,
                             CASE
                                 WHEN BOOL_OR(ag.permission = 'delete')
@@ -1196,7 +1196,7 @@ impl AuthorizationEngine for PgAclEngine {
                     )
                     SELECT ag.resource_type, ag.resource_id, rp.first_shared_at,
                            ag.subject_type, ag.subject_id,
-                           COALESCE(u.username, sh.item_name, fi.name, fld.name, ag.subject_id::text) AS subject_display,
+                           COALESCE(u.username, u.email, sh.item_name, fi.name, fld.name, ag.subject_id::text) AS subject_display,
                            ag.id AS grant_id, ag.granted_at, ag.expires_at, ag.permission,
                            NULL::text AS sort_str, NULL::bigint AS sort_int,
                            (sh.password_hash IS NOT NULL) AS has_password
