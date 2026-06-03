@@ -5,6 +5,8 @@
  * It loads translations from the server and provides functions to translate keys.
  */
 
+import { getCsrfHeaders } from './csrf.js';
+
 // Supported locales (languages that have locale files on the server)
 // Keep in sync with AVAILABLE_LOCALES in core/languageSelector.js
 const supportedLocales = ['en', 'es', 'zh', 'zh-TW', 'fa', 'fr', 'de', 'pt', 'nl', 'it', 'hi', 'ar', 'ru', 'ja', 'ko', 'pl'];
@@ -141,6 +143,14 @@ async function setLocale(locale) {
     // Save locale preference
     localStorage.setItem('oxicloud-locale', locale);
 
+    // PR C: also persist server-side via PATCH /api/auth/me/profile
+    // so the same choice is honoured by transactional emails and
+    // survives across devices. Fire-and-forget — anonymous callers
+    // (login page, magic-link landing) will 401 and that's fine; a
+    // network blip just leaves the row at its previous value, which
+    // localStorage already reflects on this device.
+    _persistLocaleToServer(locale);
+
     // Trigger an event for components to update
     window.dispatchEvent(new CustomEvent('localeChanged', { detail: { locale } }));
 
@@ -148,6 +158,31 @@ async function setLocale(locale) {
     translatePage();
 
     return true;
+}
+
+/**
+ * Fire-and-forget POST of the new locale to the server. Called from
+ * `setLocale`; failures are logged but never block the UI flip.
+ *
+ * The server side rejects requests from anonymous callers (no session
+ * cookie) with 401 — that's expected on the login / magic-link pages
+ * where i18n.js runs before the user is authenticated, so we treat any
+ * non-2xx as "skip, the next save will reconcile".
+ *
+ * @param {string} locale
+ */
+function _persistLocaleToServer(locale) {
+    fetch('/api/auth/me/profile', {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            ...getCsrfHeaders()
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ preferred_locale: locale })
+    }).catch((err) => {
+        console.debug('locale: server persistence skipped:', err?.message ?? err);
+    });
 }
 
 /**

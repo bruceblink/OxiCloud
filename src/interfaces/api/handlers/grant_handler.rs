@@ -137,7 +137,14 @@ pub async fn create_grant(
                     state.email_invite_rate_limiter.retry_after(),
                 );
             }
-            match invite_svc.resolve_or_create_recipient(&email).await {
+            // PR C: pass the inviter id so resolve_or_create_recipient
+            // can inherit their preferred_locale onto a freshly-
+            // provisioned external user (best-effort; lookup failure
+            // just leaves the new row's locale NULL, no hard error).
+            match invite_svc
+                .resolve_or_create_recipient(&email, Some(caller_id))
+                .await
+            {
                 Ok(user) => (Subject::User(user.id()), Some(user)),
                 Err(e) => return AppError::from(e).into_response(),
             }

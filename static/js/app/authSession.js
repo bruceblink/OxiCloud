@@ -3,6 +3,7 @@
  */
 
 import { getCsrfHeaders } from '../core/csrf.js';
+import { i18n } from '../core/i18n.js';
 import { updateStorageUsageDisplay } from './main.js';
 import { app } from './state.js';
 import { ui } from './ui.js';
@@ -11,6 +12,37 @@ import { updateUserMenuData } from './userMenu.js';
 /**
  * @import {User} from '../core/types.js'
  */
+
+/**
+ * Apply the server's `preferred_locale` to this browser if it differs
+ * from the currently-active one.
+ *
+ * The page initially renders in whichever locale `i18n.initI18n()`
+ * picked from localStorage / Accept-Language. After `/api/auth/me`
+ * returns we know the user's persisted choice; if this is a fresh
+ * browser (no `oxicloud-locale` in localStorage) or the local copy
+ * drifted (user changed their preference elsewhere), switching here
+ * is what makes "sign in on phone, see UI in the language I picked on
+ * my laptop" work.
+ *
+ * Safeguards:
+ *  - `null` / `undefined` server value means "no preference stored" →
+ *    leave the browser-picked locale alone.
+ *  - When the server value matches the active locale we skip
+ *    `setLocale` entirely to avoid a no-op `translatePage()` flash.
+ *  - `setLocale` itself writes the new value back via PATCH; that's
+ *    benign here (server already agrees) and avoids special-casing
+ *    the call site.
+ *
+ * @param {string|undefined|null} serverLocale
+ */
+function _syncPreferredLocale(serverLocale) {
+    if (!serverLocale) return;
+    if (i18n.getCurrentLocale && i18n.getCurrentLocale() === serverLocale) return;
+    i18n.setLocale(serverLocale).catch((err) => {
+        console.debug('locale: sync from server failed:', err?.message ?? err);
+    });
+}
 
 /**
  *
@@ -40,6 +72,11 @@ async function refreshUserData() {
 
         localStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
         app.isExternalUser = !!userData.is_external;
+        // PR C: sync the server-stored preferred_locale to this device.
+        // Triggered on every `/api/auth/me` fetch, but `_syncPreferredLocale`
+        // short-circuits when the active locale already matches so we
+        // don't trigger an unnecessary translatePage() pass.
+        _syncPreferredLocale(userData.preferred_locale);
         updateStorageUsageDisplay(userData);
         return userData;
     } catch (error) {

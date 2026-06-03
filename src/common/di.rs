@@ -1018,6 +1018,7 @@ impl AppServiceFactory {
                     email_sender,
                     lifecycle,
                     app_state.applications.i18n_service.clone(),
+                    app_state.locale_registry.clone(),
                     self.config.magic_link.clone(),
                     self.config.base_url(),
                 ),

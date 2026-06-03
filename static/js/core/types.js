@@ -165,6 +165,7 @@
  * @property {string} [given_name]    First/given name; set at OIDC JIT or via PATCH /api/auth/me/profile (PR 24)
  * @property {string} [family_name]   Last/family name; set at OIDC JIT or via PATCH /api/auth/me/profile (PR 24)
  * @property {string} [email_verified_at]  ISO 8601 timestamp of the first proof-of-email-control (PR 23). Omitted when unverified.
+ * @property {string} [preferred_locale]    User-chosen locale code (e.g. `"fr"`, `"zh-TW"`); omitted when unset. Round-trips via PATCH /api/auth/me/profile.
  */
 
 /**

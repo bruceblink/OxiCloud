@@ -96,6 +96,11 @@ pub struct MagicLinkInviteService {
     email_sender: Arc<dyn EmailSender>,
     user_lifecycle: Arc<UserLifecycleService>,
     i18n: Arc<I18nApplicationService>,
+    /// Used to validate a stored `preferred_locale` at render time —
+    /// a code that's no longer in the registry (e.g. operator removed
+    /// `pl.json`) falls back to the server default instead of raising
+    /// a translation error.
+    locale_registry: Arc<crate::common::locale::LocaleRegistry>,
     magic_link_cfg: MagicLinkConfig,
     /// Public base URL of this OxiCloud instance — used to build the
     /// `/magic/v1/{token}` invitation link. Sourced from
@@ -111,6 +116,7 @@ impl MagicLinkInviteService {
         email_sender: Arc<dyn EmailSender>,
         user_lifecycle: Arc<UserLifecycleService>,
         i18n: Arc<I18nApplicationService>,
+        locale_registry: Arc<crate::common::locale::LocaleRegistry>,
         magic_link_cfg: MagicLinkConfig,
         public_base_url: String,
     ) -> Self {
@@ -120,9 +126,23 @@ impl MagicLinkInviteService {
             email_sender,
             user_lifecycle,
             i18n,
+            locale_registry,
             magic_link_cfg,
             public_base_url,
         }
+    }
+
+    /// Resolve the recipient's preferred locale into a usable `Locale`.
+    /// Returns the server default when:
+    ///   - `preferred_locale` is `None` (the common case for pre-PR-C
+    ///     users and recipients who never picked a language),
+    ///   - the stored code no longer resolves against the registry
+    ///     (e.g. operator removed a locale file after the row was
+    ///     written, or a future schema migration relaxed the CHECK).
+    fn locale_for(&self, user: &User) -> Locale {
+        user.preferred_locale()
+            .and_then(|code| self.locale_registry.parse(code))
+            .unwrap_or_else(|| self.locale_registry.default_locale().clone())
     }
 
     /// Resolve the email to an existing user, or lazily provision a new
@@ -134,24 +154,54 @@ impl MagicLinkInviteService {
     ///   (`OXICLOUD_ALLOW_EXTERNAL_USERS=false`) and no matching user
     ///   exists, OR the email's domain isn't in the allowlist.
     /// - any propagated repo error.
-    pub async fn resolve_or_create_recipient(&self, raw_email: &str) -> Result<User, DomainError> {
+    pub async fn resolve_or_create_recipient(
+        &self,
+        raw_email: &str,
+        inviter_id: Option<uuid::Uuid>,
+    ) -> Result<User, DomainError> {
         let normalised = normalize_email(raw_email).map_err(|e| {
             DomainError::new(ErrorKind::InvalidInput, "MagicLinkInvite", format!("{}", e))
         })?;
 
         // Fast path: existing user with this email — works for both
         // internal (was previously created via normal registration) and
-        // external (previous invitation re-sharing) cases.
+        // external (previous invitation re-sharing) cases. We do NOT
+        // touch `preferred_locale` on an existing row; the recipient's
+        // own choice (or a previously-inherited value) wins.
         match UserRepository::get_user_by_email(&*self.user_storage, &normalised).await {
             Ok(user) => Ok(user),
-            Err(UserRepositoryError::NotFound(_)) => self.create_external_user(&normalised).await,
+            Err(UserRepositoryError::NotFound(_)) => {
+                // Best-effort inviter locale lookup. A failure here
+                // (deleted inviter row, transient DB blip) is non-fatal
+                // — the recipient is created with NULL locale and
+                // resolves to the server default like any pre-PR-C row.
+                let inviter_locale = if let Some(uid) = inviter_id {
+                    match UserRepository::get_user_by_id(&*self.user_storage, uid).await {
+                        Ok(u) => u.preferred_locale().map(str::to_string),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+                self.create_external_user(&normalised, inviter_locale).await
+            }
             Err(e) => Err(DomainError::from(e)),
         }
     }
 
     /// Lazy provisioning path. Runs the two policy guards (kill switch
     /// and per-domain allowlist) before touching the DB.
-    async fn create_external_user(&self, normalised_email: &str) -> Result<User, DomainError> {
+    ///
+    /// `inviter_locale` is the inviter's `preferred_locale` if any —
+    /// PR C inherits it into the new external user's row so the
+    /// invitation mail (and any subsequent emails to the recipient)
+    /// arrive in a language the inviter likely shares with them. The
+    /// recipient can override later via the language switcher.
+    async fn create_external_user(
+        &self,
+        normalised_email: &str,
+        inviter_locale: Option<String>,
+    ) -> Result<User, DomainError> {
         if !self.magic_link_cfg.allow_external_users {
             return Err(DomainError::new(
                 ErrorKind::AccessDenied,
@@ -175,7 +225,7 @@ impl MagicLinkInviteService {
 
         // External users are created without a username or password.
         // `password_hash IS NULL` is the canonical no-password marker.
-        let user = User::new(
+        let mut user = User::new(
             normalised_email.to_string(),
             None,
             None,
@@ -192,6 +242,14 @@ impl MagicLinkInviteService {
                 format!("invalid external user data: {}", e),
             )
         })?;
+        // PR C: inherit the inviter's preferred locale at row creation
+        // (decision 6 in the plan). Treated as advisory — frequently
+        // wrong, but the recipient can override via the language
+        // switcher, and the bilingual email partial ships English
+        // alongside any non-English copy as a safety net.
+        if let Some(locale) = inviter_locale {
+            user.set_preferred_locale(Some(locale));
+        }
 
         let saved = UserRepository::create_user(&*self.user_storage, user.clone())
             .await
@@ -269,11 +327,12 @@ impl MagicLinkInviteService {
             Resource::Folder(_) => "server.magic_link.email.kind_folder",
             Resource::File(_) => "server.magic_link.email.kind_file",
         };
-        // PR C will resolve the recipient's preferred_locale. For now
-        // (PR B) every magic-link email defaults to the server default
-        // locale; the bilingual partial below means non-English
-        // recipients still see English as a safety net.
-        let locale = Locale::default();
+        // PR C: render in the recipient's preferred locale (set by UI
+        // switcher, OIDC JIT claim, or inviter inheritance at row
+        // creation). The bilingual partial appends English below when
+        // the resolved locale isn't English, so a wrong guess still
+        // produces a readable mail.
+        let locale = self.locale_for(recipient);
         let kind_label = self.i18n_or(kind_key, &locale, &[]).await;
         let ttl_hours = self.magic_link_cfg.invite_ttl_hours.to_string();
         let invite_args: Vec<(&str, &str)> = vec![
@@ -455,9 +514,9 @@ impl MagicLinkInviteService {
             self.public_base_url.trim_end_matches('/'),
             token.token(),
         );
-        // PR C will switch to `user.preferred_locale` once the column
-        // lands. Today the login-via-email path uses the server default.
-        let locale = Locale::default();
+        // PR C: render in the user's preferred locale. Same bilingual
+        // safety net as the invitation path — see `issue_invitation`.
+        let locale = self.locale_for(&user);
         let ttl_minutes = self.magic_link_cfg.login_ttl_minutes.to_string();
         let login_args: Vec<(&str, &str)> = vec![("link", &link), ("ttl_minutes", &ttl_minutes)];
 

@@ -47,6 +47,12 @@ pub struct UserDto {
     /// subsequent verifications.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email_verified_at: Option<DateTime<Utc>>,
+    /// User-chosen locale for server-rendered surfaces (emails,
+    /// future authenticated HTML). `None` = no preference (the server
+    /// resolves to `OXICLOUD_DEFAULT_LOCALE` when rendering). Round-trips
+    /// through `/api/auth/me` and `PATCH /api/auth/me/profile`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_locale: Option<String>,
 }
 
 impl From<User> for UserDto {
@@ -69,6 +75,7 @@ impl From<User> for UserDto {
             given_name: user.given_name().map(str::to_string),
             family_name: user.family_name().map(str::to_string),
             email_verified_at: user.email_verified_at(),
+            preferred_locale: user.preferred_locale().map(str::to_string),
         }
     }
 }
@@ -155,6 +162,13 @@ pub struct UpdateProfileDto {
     /// New last/family name. Same semantics as `given_name`.
     #[serde(default)]
     pub family_name: Option<String>,
+    /// New preferred locale (BCP-47 shape, e.g. `"fr"`, `"zh-TW"`).
+    /// Must resolve against the server's `LocaleRegistry` — unknown
+    /// codes are rejected with 400. Pass an empty string to clear the
+    /// preference back to the server default (the application layer
+    /// normalises `""` → `None`).
+    #[serde(default)]
+    pub preferred_locale: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

@@ -70,6 +70,7 @@ struct IdTokenClaims {
     groups: Option<Vec<String>>,
     nonce: Option<String>,
     picture: Option<String>,
+    locale: Option<String>,
     // Standard JWT fields
     #[allow(dead_code)]
     iss: Option<String>,
@@ -96,6 +97,7 @@ struct UserInfoResponse {
     family_name: Option<String>,
     groups: Option<Vec<String>>,
     picture: Option<String>,
+    locale: Option<String>,
 }
 
 // ============================================================================
@@ -469,6 +471,7 @@ impl OidcServicePort for OidcService {
             family_name: claims.family_name,
             groups: claims.groups.unwrap_or_default(),
             picture: claims.picture,
+            locale: claims.locale,
         })
     }
 
@@ -523,6 +526,7 @@ impl OidcServicePort for OidcService {
             family_name: info.family_name,
             groups: info.groups.unwrap_or_default(),
             picture: info.picture,
+            locale: info.locale,
         })
     }
 

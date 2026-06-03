@@ -72,6 +72,19 @@ pub struct User {
     /// flow. PR 23 ships the signal only — future policy PRs gate
     /// features (uploads, shares, etc.) on this column.
     email_verified_at: Option<DateTime<Utc>>,
+    /// User-chosen locale for server-rendered surfaces (transactional
+    /// emails, future authenticated HTML pages). `None` = no preference,
+    /// resolves to `OXICLOUD_DEFAULT_LOCALE` at use time. Set by:
+    /// - the frontend language switcher (PATCH /api/auth/me/profile),
+    /// - the OIDC JIT path at provisioning **only**, never re-applied
+    ///   on subsequent logins (a UI choice always wins over the IdP),
+    /// - the magic-link invitation flow, which copies the inviter's
+    ///   value into the new external user's row.
+    ///
+    /// Schema-level CHECK enforces a textual BCP-47 shape; the
+    /// application layer is the authoritative gatekeeper against the
+    /// `LocaleRegistry`.
+    preferred_locale: Option<String>,
 }
 
 impl User {
@@ -161,6 +174,10 @@ impl User {
             // magic-link redemption or OIDC JIT (where the IdP has
             // already confirmed the email).
             email_verified_at: None,
+            // PR C: no locale preference at creation. OIDC JIT, the
+            // language switcher, or invitation-time inheritance fill
+            // this in later. NULL resolves to OXICLOUD_DEFAULT_LOCALE.
+            preferred_locale: None,
         })
     }
 
@@ -203,6 +220,7 @@ impl User {
             given_name: None,
             family_name: None,
             email_verified_at: None,
+            preferred_locale: None,
         }
     }
 
@@ -226,6 +244,7 @@ impl User {
         given_name: Option<String>,
         family_name: Option<String>,
         email_verified_at: Option<DateTime<Utc>>,
+        preferred_locale: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -246,6 +265,7 @@ impl User {
             given_name,
             family_name,
             email_verified_at,
+            preferred_locale,
         }
     }
 
@@ -387,6 +407,26 @@ impl User {
 
     pub fn set_family_name(&mut self, family_name: Option<String>) {
         self.family_name = family_name;
+        self.updated_at = Utc::now();
+    }
+
+    /// Borrow the user's stored locale code (e.g. `"fr"`, `"zh-TW"`),
+    /// if any. The application layer is expected to feed this through
+    /// `LocaleRegistry::parse_or_default` before rendering, so an
+    /// orphaned code from a since-removed locale falls back gracefully
+    /// instead of triggering a translation error.
+    pub fn preferred_locale(&self) -> Option<&str> {
+        self.preferred_locale.as_deref()
+    }
+
+    /// Set or clear the user's preferred locale. The caller is
+    /// responsible for having already validated the code against the
+    /// `LocaleRegistry` — at the entity layer we treat the field as
+    /// opaque text, the way we do for `given_name` / `family_name`.
+    /// Passing `None` clears the preference (subsequent renders fall
+    /// back to the server default).
+    pub fn set_preferred_locale(&mut self, locale: Option<String>) {
+        self.preferred_locale = locale;
         self.updated_at = Utc::now();
     }
 

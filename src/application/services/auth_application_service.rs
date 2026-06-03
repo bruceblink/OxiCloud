@@ -1164,6 +1164,7 @@ impl AuthApplicationService {
         &self,
         caller_id: Uuid,
         dto: crate::application::dtos::user_dto::UpdateProfileDto,
+        locale_registry: &crate::common::locale::LocaleRegistry,
     ) -> Result<UserDto, DomainError> {
         let mut user = self.user_storage.get_user_by_id(caller_id).await?;
 
@@ -1259,6 +1260,42 @@ impl AuthApplicationService {
             }
             user.set_family_name(Some(f.clone()));
             changed.push("family_name");
+        }
+
+        // ── Preferred locale ─────────────────────────────────────
+        // Treat `""` as an explicit clear (frontend may send the empty
+        // string when the user picks "Use server default"). Any other
+        // non-empty value must resolve against the LocaleRegistry — an
+        // unknown code is a 400 so the client can show the user a
+        // useful error rather than silently dropping the change.
+        if let Some(ref code) = dto.preferred_locale {
+            let trimmed = code.trim();
+            if trimmed.is_empty() {
+                user.set_preferred_locale(None);
+                changed.push("preferred_locale");
+            } else if let Some(canonical) = locale_registry.parse(trimmed) {
+                user.set_preferred_locale(Some(canonical.as_str().to_string()));
+                changed.push("preferred_locale");
+            } else {
+                tracing::info!(
+                    target: "audit",
+                    event = "auth.profile_update_rejected",
+                    reason = "unknown_locale",
+                    caller_id = %caller_id,
+                    attempted_locale = %trimmed,
+                    "👤 profile update rejected: locale '{}' not in registry",
+                    trimmed,
+                );
+                return Err(DomainError::new(
+                    ErrorKind::InvalidInput,
+                    "User",
+                    format!(
+                        "Unknown locale '{}'. Use one of the codes returned \
+                         by /api/i18n/locales.",
+                        trimmed,
+                    ),
+                ));
+            }
         }
 
         if changed.is_empty() {
@@ -1917,6 +1954,7 @@ impl AuthApplicationService {
         &self,
         code: &str,
         state: &str,
+        locale_registry: &crate::common::locale::LocaleRegistry,
     ) -> Result<OidcCallbackResult, DomainError> {
         // 0. Validate CSRF state and retrieve PKCE verifier + nonce + optional NC token
         //    (entry is auto-expired by moka TTL — remove returns None if expired)
@@ -1968,6 +2006,7 @@ impl AuthApplicationService {
                     given_name: user_info.given_name.or(claims.given_name),
                     family_name: user_info.family_name.or(claims.family_name),
                     email_verified: user_info.email_verified.or(claims.email_verified),
+                    locale: user_info.locale.or(claims.locale),
                     groups: if user_info.groups.is_empty() {
                         claims.groups
                     } else {
@@ -2133,6 +2172,21 @@ impl AuthApplicationService {
                 new_user.set_image(claims.picture.clone());
                 new_user.set_given_name(claims.given_name.clone());
                 new_user.set_family_name(claims.family_name.clone());
+                // PR C: provision the user's preferred_locale from the
+                // OIDC `locale` claim AT JIT ONLY. Subsequent logins
+                // never re-apply this — a UI-driven choice ("I prefer
+                // English even though my IdP says fr-CA") must not be
+                // silently overwritten on the next sign-in. We validate
+                // the claim against the registry so an obscure or
+                // malformed code (e.g. `klingon`, `fr-FR-x-private`)
+                // doesn't end up stored only to fail at render time;
+                // unresolvable claims fall through to NULL → server
+                // default.
+                if let Some(claim) = claims.locale.as_deref()
+                    && let Some(canonical) = locale_registry.parse(claim)
+                {
+                    new_user.set_preferred_locale(Some(canonical.as_str().to_string()));
+                }
                 // PR 23: the OIDC callback rejected any caller upstream
                 // whose `email_verified` claim wasn't true, so users
                 // reaching this branch have an IdP-vetted email. Stamp

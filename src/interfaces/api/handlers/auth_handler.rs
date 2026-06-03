@@ -559,7 +559,7 @@ pub async fn update_profile(
 
     let updated = auth_service
         .auth_application_service
-        .update_profile_with_perms(user_id, dto)
+        .update_profile_with_perms(user_id, dto, &state.locale_registry)
         .await?;
 
     Ok((StatusCode::OK, Json(updated)))
@@ -926,7 +926,7 @@ pub async fn oidc_callback(
 
     // Exchange code, validate state/nonce/PKCE, authenticate user
     let result = auth_app
-        .oidc_callback(&query.code, &query.state)
+        .oidc_callback(&query.code, &query.state, &state.locale_registry)
         .await
         .map_err(|e| {
             tracing::error!("OIDC callback failed: {}", e);

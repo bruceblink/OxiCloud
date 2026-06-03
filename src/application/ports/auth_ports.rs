@@ -173,6 +173,12 @@ pub struct OidcIdClaims {
     pub family_name: Option<String>,
     pub groups: Vec<String>,
     pub picture: Option<String>,
+    /// Standard OpenID claim `locale` (BCP-47 language tag, e.g.
+    /// `"fr"`, `"zh-TW"`). Populated on the new `User` row at OIDC JIT
+    /// provisioning if the claim resolves against the server's
+    /// `LocaleRegistry`; ignored on subsequent logins so a later
+    /// UI-driven choice isn't overwritten by the IdP.
+    pub locale: Option<String>,
 }
 
 /// Port for OIDC operations — implemented in infrastructure layer
