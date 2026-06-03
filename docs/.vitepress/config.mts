@@ -97,6 +97,7 @@ export default defineConfig({
             { text: "Favorites & Recent", link: "/guide/favorites-and-recent" },
             { text: "Search", link: "/guide/search" },
             { text: "Thumbnails & Transcoding", link: "/guide/thumbnails-and-transcoding" },
+            { text: "Sharing", link: "/guide/sharing" },
             { text: "Trash & Recycle Bin", link: "/guide/trash" },
             { text: "ZIP & Compression", link: "/guide/zip-and-compression" },
             { text: "Internationalization", link: "/guide/i18n" },
