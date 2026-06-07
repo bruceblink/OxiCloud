@@ -14,15 +14,43 @@
 -- chain on every file write and every folder mutation. Performance
 -- ceiling: O(depth) row updates per mutation; deep concurrent writes
 -- to the same root subtree can contend on the root row.
+--
+-- Idempotency note: this migration was originally numbered
+-- `20260625000000` and collided with `files_user_size_index` from a
+-- parallel branch. Both files were renamed to disjoint versions, and
+-- this body uses `IF NOT EXISTS` / `CREATE OR REPLACE` /
+-- `DROP TRIGGER IF EXISTS` throughout so the migration is safe to
+-- re-run against databases that already applied it under the old
+-- version number. An orphan row for `20260625000000` may remain in
+-- `_sqlx_migrations` on such databases — sqlx ignores rows whose
+-- version no longer maps to a source file.
 
-ALTER TABLE storage.folders
-    ADD COLUMN tree_modified_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-
--- Backfill existing rows: collapse the rollup timestamp to the
--- per-folder updated_at. Clients re-walking after deploy will see
--- one batch of "looks new to me" responses, which they handle as a
--- content-match-no-download — the expected one-time resync wave.
-UPDATE storage.folders SET tree_modified_at = updated_at;
+-- Gate the entire column-add + backfill block on column absence.
+-- A naive `ADD COLUMN IF NOT EXISTS` paired with an unconditional
+-- backfill `UPDATE` would clobber trigger-bumped values back to
+-- `updated_at` on databases that already deployed this migration
+-- under the old `20260625000000` version — every folder NC clients
+-- have synced since first deploy would suddenly look "modified",
+-- triggering a one-time re-walk. The DO block keeps the migration
+-- a true no-op for those databases: column exists → skip both
+-- statements → preserve the live trigger-maintained values.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'storage'
+           AND table_name = 'folders'
+           AND column_name = 'tree_modified_at'
+    ) THEN
+        ALTER TABLE storage.folders
+            ADD COLUMN tree_modified_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+        -- Backfill on first-deploy: collapse to per-folder updated_at.
+        -- Clients re-walking after deploy will see one batch of
+        -- "looks new to me" responses, handled as
+        -- content-match-no-download — the expected one-time resync.
+        UPDATE storage.folders SET tree_modified_at = updated_at;
+    END IF;
+END $$;
 
 
 -- File-side trigger: any INSERT/UPDATE/DELETE on storage.files
@@ -60,6 +88,10 @@ BEGIN
 END;
 $$;
 
+-- PG 13 doesn't support `CREATE OR REPLACE TRIGGER` (added in PG 14),
+-- so use the DROP-then-CREATE pattern to stay re-runnable on the
+-- minimum supported version.
+DROP TRIGGER IF EXISTS files_bump_folder_tree_etag ON storage.files;
 CREATE TRIGGER files_bump_folder_tree_etag
     AFTER INSERT OR UPDATE OR DELETE ON storage.files
     FOR EACH ROW EXECUTE FUNCTION storage.bump_folder_tree_from_file();
@@ -99,6 +131,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS folders_bump_folder_tree_etag ON storage.folders;
 CREATE TRIGGER folders_bump_folder_tree_etag
     AFTER INSERT OR UPDATE OR DELETE ON storage.folders
     FOR EACH ROW EXECUTE FUNCTION storage.bump_folder_tree_from_folder();
