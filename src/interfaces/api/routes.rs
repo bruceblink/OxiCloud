@@ -2,10 +2,11 @@ use crate::application::services::batch_operations::BatchOperationService;
 use crate::common::di::AppState;
 use axum::{
     Router,
+    body::Body,
     extract::{DefaultBodyLimit, State},
     http::StatusCode,
-    response::{IntoResponse, Json as AxumJson},
-    routing::{delete, get, post, put},
+    response::{IntoResponse, Json as AxumJson, Response},
+    routing::{any, delete, get, post, put},
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -588,10 +589,32 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
         .with_state(app_state.clone());
     router = router.nest("/users", users_router);
 
+    // Collector for any unknown `/api/*` path. Without this, an
+    // unmatched API URL falls through Axum's matcher to the
+    // ServeDir fallback and is logged under `http::web` — wrong
+    // surface for operator triage. Adding the catch-all here
+    // anchors the 404 on whichever access-log layer the parent
+    // mount applies (i.e. `http::api`).
+    //
+    // The bare `/api/auth/*`, `/api/wopi/*`, and other more-
+    // specific nests are registered at higher specificity and
+    // still win over this catch-all — Axum's matcher prefers
+    // them on every overlapping request.
+    router = router.route("/{*rest}", any(api_not_found));
+
     // Compression is applied once, globally, in `main.rs` with a content-type
     // aware predicate that skips already-compressed media. Re-applying it here
     // would double-wrap `/api`: this inner layer (no predicate) would compress
     // media downloads, burning CPU for ~0 gain and stripping `Content-Length`.
     // So this router only adds tracing; compression is the global layer's job.
     router.layer(TraceLayer::new_for_http())
+}
+
+/// Catch-all 404 for unknown `/api/*` paths. Pure log-anchoring
+/// shim — see the comment in `create_api_routes`.
+async fn api_not_found() -> Response {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::empty())
+        .unwrap()
 }

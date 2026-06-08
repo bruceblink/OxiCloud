@@ -76,7 +76,33 @@ pub fn nextcloud_routes_with_state(state: Arc<AppState>) -> Router<Arc<AppState>
         .route(
             "/ocs/v2.php/cloud/capabilities",
             get(ocs_handler::handle_capabilities_v2),
-        );
+        )
+        // Final NC catch-alls. Any `/ocs/*` or `/remote.php/*` URL
+        // the routes above don't claim returns 404 here — so it's
+        // logged under the `http::nextcloud` access-log target the
+        // surrounding `.layer(access_log!(…))` in main.rs assigns,
+        // instead of falling through Axum's matcher to ServeDir
+        // and being mis-attributed to `http::web`.
+        //
+        // Concrete example: NC desktop probes
+        // `/ocs/v2.php/core/navigation/apps` to discover server
+        // features. We don't implement that endpoint; without these
+        // catch-alls the 404 was emitted at `http::web`, which is
+        // misleading for operators triaging Nextcloud client noise.
+        //
+        // Mounted on the PUBLIC sub-router (NOT behind basic-auth)
+        // so unknown-endpoint probes return 404 regardless of
+        // whether the client sent credentials. Moving them into
+        // `protected` would turn anonymous probes into 401
+        // challenges, which breaks some clients' capability-
+        // detection paths.
+        //
+        // Axum routes more-specific paths first, so the specific
+        // NC routes above (and the protected ones below) still
+        // claim their requests; only genuinely unmatched paths
+        // reach these handlers.
+        .route("/ocs/{*rest}", any(handle_nc_not_found))
+        .route("/remote.php/{*rest}", any(handle_nc_not_found));
 
     // Protected routes — require Basic Auth via app passwords.
     let protected = Router::new()
@@ -294,6 +320,17 @@ async fn handle_dav_discovery() -> Response {
         .status(StatusCode::OK)
         .header("DAV", "1, 3")
         .header("Allow", "OPTIONS, GET, HEAD, PROPFIND")
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// Catch-all 404 for any `/ocs/*` or `/remote.php/*` path the NC
+/// router doesn't recognize. Exists purely to anchor the access-log
+/// target — see the comment on the routes above for the operator
+/// rationale.
+async fn handle_nc_not_found() -> Response {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
         .body(Body::empty())
         .unwrap()
 }

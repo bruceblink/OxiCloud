@@ -15,7 +15,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, Request, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::{get, post},
+    routing::{any, get, post},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -568,6 +568,12 @@ pub fn wopi_routes(
         .route("/edit/{file_id}", get(host_page))
         // Supported extensions (public, no auth)
         .route("/supported-extensions", get(get_supported_extensions))
+        // Collector for any unknown `/wopi/*` path — keeps the
+        // access-log target as `http::wopi` instead of letting
+        // M365/Collabora probes leak into `http::web` via the
+        // ServeDir fallback. Same rationale as the NC `/ocs/*`
+        // catch-all in interfaces/nextcloud/routes.rs.
+        .route("/{*rest}", any(wopi_not_found))
         .with_state(wopi_state.clone());
 
     let api_router = Router::new()
@@ -575,4 +581,15 @@ pub fn wopi_routes(
         .with_state(wopi_state);
 
     (protocol_router, api_router)
+}
+
+/// Catch-all 404 for unknown paths nested under `/wopi`. Exists
+/// purely to anchor the access-log target to `http::wopi` instead
+/// of letting the request fall through Axum's matcher to
+/// ServeDir and being mis-attributed to `http::web`.
+async fn wopi_not_found() -> Response {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::empty())
+        .unwrap()
 }
