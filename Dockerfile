@@ -1,7 +1,10 @@
 # ─── Stage 1: Shared build base (avoids duplicate apk install) ────────────────
 FROM rust:1.94.1-alpine3.23 AS base
+# sqlx's postgres driver speaks the wire protocol in pure Rust (no pq-sys in
+# Cargo.lock) and TLS goes through rustls, so libpq headers are never needed at
+# build time. perl/make/gcc/musl-dev remain for the C builds of aws-lc-sys.
 RUN apk --no-cache upgrade && \
-    apk add --no-cache musl-dev pkgconfig postgresql-dev gcc perl make
+    apk add --no-cache musl-dev pkgconfig gcc perl make
 
 # ─── Stage 2: Cache dependencies ─────────────────────────────────────────────
 FROM base AS cacher
@@ -49,9 +52,10 @@ LABEL org.opencontainers.image.title="OxiCloud" \
       org.opencontainers.image.licenses="MIT"
 
 # Install only necessary runtime dependencies and update packages
-# su-exec is needed by the entrypoint to drop privileges after fixing volume permissions
+# su-exec is needed by the entrypoint to drop privileges after fixing volume permissions.
+# No libpq: the pure-Rust sqlx postgres driver never links it.
 RUN apk --no-cache upgrade && \
-    apk add --no-cache libgcc ca-certificates libpq tzdata su-exec && \
+    apk add --no-cache libgcc ca-certificates tzdata su-exec && \
     addgroup -g 1001 -S oxicloud && \
     adduser -u 1001 -S oxicloud -G oxicloud
 
