@@ -658,6 +658,21 @@ async fn handle_proppatch(
 ) -> Result<Response<Body>, AppError> {
     let _user = extract_user(&req)?;
 
+    // Active-lock guard (RFC 4918 §9.10.4): PROPPATCH writes properties,
+    // so a lock on the target must release them via `If:`. Captured
+    // before the body is consumed below so a rejected request doesn't
+    // even parse the XML.
+    let if_header_owned = req
+        .headers()
+        .get("If")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    if let Some(resp) =
+        enforce_native_lock(&state.webdav_lock_store, if_header_owned.as_deref(), &path)
+    {
+        return Ok(resp);
+    }
+
     // Resolve the target resource type BEFORE consuming the body so
     // we can pick the correct href shape in the multi-status
     // response. RFC 4918 §5.2 + strict WebDAV-client parser rules
@@ -1237,6 +1252,18 @@ async fn handle_delete(
 ) -> Result<Response<Body>, AppError> {
     let user = extract_user(&req)?;
 
+    // Active-lock guard (RFC 4918 §9.10.4).
+    let if_header_owned = req
+        .headers()
+        .get("If")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    if let Some(resp) =
+        enforce_native_lock(&state.webdav_lock_store, if_header_owned.as_deref(), &path)
+    {
+        return Ok(resp);
+    }
+
     // Get services from state
     let file_retrieval_service = &state.applications.file_retrieval_service;
     let file_management_service = &state.applications.file_management_service;
@@ -1293,6 +1320,23 @@ async fn handle_move(
     let user = extract_user(&req)?;
     let source_path = path;
 
+    // Captured up front so a rejected MOVE doesn't run any DB work.
+    let if_header_owned = req
+        .headers()
+        .get("If")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    // Active-lock guard on the SOURCE (RFC 4918 §9.10.4): the move
+    // removes the source resource, which counts as modifying it.
+    if let Some(resp) = enforce_native_lock(
+        &state.webdav_lock_store,
+        if_header_owned.as_deref(),
+        &source_path,
+    ) {
+        return Ok(resp);
+    }
+
     // Get destination from Destination header
     let destination = req
         .headers()
@@ -1320,6 +1364,17 @@ async fn handle_move(
 
     // SECURITY: reject path-traversal in destination
     reject_path_traversal(&destination_path)?;
+
+    // Destination lock guard: MOVE also creates/replaces a resource at
+    // the destination. If that path is locked, the same If: header must
+    // satisfy it.
+    if let Some(resp) = enforce_native_lock(
+        &state.webdav_lock_store,
+        if_header_owned.as_deref(),
+        &destination_path,
+    ) {
+        return Ok(resp);
+    }
 
     // Get services from state
     let file_retrieval_service = &state.applications.file_retrieval_service;
@@ -1455,6 +1510,15 @@ async fn handle_copy(
     let user = extract_user(&req)?;
     let source_path = path;
 
+    // Captured up front (cheap; used below for the destination lock guard).
+    // COPY doesn't mutate the source, so no source lock check — only the
+    // destination needs to clear (RFC 4918 §9.10.4).
+    let if_header_owned = req
+        .headers()
+        .get("If")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
     // Get destination from Destination header
     let destination = req
         .headers()
@@ -1482,6 +1546,15 @@ async fn handle_copy(
 
     // SECURITY: reject path-traversal in destination
     reject_path_traversal(&destination_path)?;
+
+    // Active-lock guard on the destination (RFC 4918 §9.10.4).
+    if let Some(resp) = enforce_native_lock(
+        &state.webdav_lock_store,
+        if_header_owned.as_deref(),
+        &destination_path,
+    ) {
+        return Ok(resp);
+    }
 
     // Get depth from Depth header
     let depth = req

@@ -303,6 +303,74 @@ STATUS=$(dav_curl -o /dev/null -w "%{http_code}" -X PUT \
 pass "N2b: PUT with matching If:(<token>) → 204"
 
 # ─────────────────────────────────────────────────────────────
+# N2c–N2f — Lock enforcement on the other mutator methods
+#
+# RFC 4918 §9.10.4: a lock binds every mutating method, not just
+# PUT. The native handler's `enforce_native_lock` helper was
+# designed to be called by handle_delete / handle_move /
+# handle_copy / handle_proppatch as well — these tests prove the
+# wire is in. Each case uses the n-locked.txt resource locked
+# above and a `WITHOUT If:` request, expecting 423. Positive
+# (with-token) coverage is implicit: the M-series above already
+# exercises each method on unlocked resources and asserts the
+# success codes, so a regression that hard-rejected every call
+# would fail there.
+#
+# Order matters: each must run while the lock is still held,
+# i.e. before N3 below releases it.
+# ─────────────────────────────────────────────────────────────
+echo "  N2c: DELETE /webdav/n-locked.txt without If:(<token>) → 423"
+STATUS=$(dav_curl -o /dev/null -w "%{http_code}" -X DELETE \
+    "$DAV_BASE/n-locked.txt")
+[[ "$STATUS" == "423" ]] \
+    || fail "N2c: expected 423 Locked for DELETE on locked path without token, got $STATUS"
+# The file must still be present after a rejected DELETE.
+[[ "$(dav_curl -o /dev/null -w "%{http_code}" -X PROPFIND -H "Depth: 0" "$DAV_BASE/n-locked.txt")" == "207" ]] \
+    || fail "N2c: file removed after rejected DELETE (423 was advisory only?)"
+pass "N2c: DELETE on locked path without token → 423, resource preserved"
+
+echo "  N2d: MOVE /webdav/n-locked.txt without If:(<token>) → 423 (source-side lock)"
+STATUS=$(dav_curl -o /dev/null -w "%{http_code}" -X MOVE \
+    -H "Destination: $DAV_BASE/n-locked-moved.txt" \
+    "$DAV_BASE/n-locked.txt")
+[[ "$STATUS" == "423" ]] \
+    || fail "N2d: expected 423 Locked for MOVE on locked source without token, got $STATUS"
+[[ "$(dav_curl -o /dev/null -w "%{http_code}" -X PROPFIND -H "Depth: 0" "$DAV_BASE/n-locked.txt")" == "207" ]] \
+    || fail "N2d: source disappeared after rejected MOVE"
+[[ "$(dav_curl -o /dev/null -w "%{http_code}" -X PROPFIND -H "Depth: 0" "$DAV_BASE/n-locked-moved.txt")" == "404" ]] \
+    || fail "N2d: destination created after rejected MOVE"
+pass "N2d: MOVE with locked source and no token → 423, no state mutated"
+
+echo "  N2e: COPY into /webdav/n-locked.txt (locked destination) without If:(<token>) → 423"
+# Set up a fresh unlocked source for the COPY.
+dav_curl -o /dev/null -X PUT -H "Content-Type: text/plain" \
+    --data-binary 'n2e copy source' \
+    "$DAV_BASE/n2e-copy-src.txt" > /dev/null
+STATUS=$(dav_curl -o /dev/null -w "%{http_code}" -X COPY \
+    -H "Destination: $DAV_BASE/n-locked.txt" \
+    "$DAV_BASE/n2e-copy-src.txt")
+[[ "$STATUS" == "423" ]] \
+    || fail "N2e: expected 423 Locked for COPY into locked destination without token, got $STATUS"
+# The locked destination's content must not have been replaced.
+BODY=$(dav_curl -s "$DAV_BASE/n-locked.txt")
+[[ "$BODY" == "authorised update" ]] \
+    || fail "N2e: locked destination's content was overwritten (got '$BODY')"
+pass "N2e: COPY into locked destination without token → 423, target untouched"
+
+echo "  N2f: PROPPATCH /webdav/n-locked.txt without If:(<token>) → 423"
+PROPPATCH_BODY='<?xml version="1.0" encoding="utf-8"?>
+<d:propertyupdate xmlns:d="DAV:">
+  <d:set><d:prop><d:displayname>tampered</d:displayname></d:prop></d:set>
+</d:propertyupdate>'
+STATUS=$(dav_curl -o /dev/null -w "%{http_code}" -X PROPPATCH \
+    -H "Content-Type: application/xml" \
+    --data "$PROPPATCH_BODY" \
+    "$DAV_BASE/n-locked.txt")
+[[ "$STATUS" == "423" ]] \
+    || fail "N2f: expected 423 Locked for PROPPATCH on locked path without token, got $STATUS"
+pass "N2f: PROPPATCH on locked path without token → 423"
+
+# ─────────────────────────────────────────────────────────────
 # N3 — UNLOCK with token → 204; subsequent PUT succeeds
 # ─────────────────────────────────────────────────────────────
 echo "  N3: UNLOCK /webdav/n-locked.txt + follow-up PUT succeeds"
