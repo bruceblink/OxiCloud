@@ -127,14 +127,12 @@ impl DriveRepository for DrivePgRepository {
         .map_err(|e| Self::map_sqlx_err("create_personal_drive_atomic.folder", e))?;
 
         // 3. Close the other side of the circular reference.
-        sqlx::query(
-            r#"UPDATE storage.drives SET root_folder_id = $1 WHERE id = $2"#,
-        )
-        .bind(folder_id)
-        .bind(drive_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| Self::map_sqlx_err("create_personal_drive_atomic.wire", e))?;
+        sqlx::query(r#"UPDATE storage.drives SET root_folder_id = $1 WHERE id = $2"#)
+            .bind(folder_id)
+            .bind(drive_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Self::map_sqlx_err("create_personal_drive_atomic.wire", e))?;
 
         // 4. Owner role_grant — the caller becomes the drive's sole
         //    owner (single-user invariant on personal drives, §2).

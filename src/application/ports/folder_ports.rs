@@ -44,11 +44,8 @@ pub trait FolderUseCase: Send + Sync + 'static {
     /// folder (docs/plan/drive.md §10). Pre-D0 the wrapper name
     /// embedded the username and made the path globally unique;
     /// post-D0 the caller_id filter is required.
-    async fn get_folder_by_path(
-        &self,
-        path: &str,
-        user_id: Uuid,
-    ) -> Result<FolderDto, DomainError>;
+    async fn get_folder_by_path(&self, path: &str, user_id: Uuid)
+    -> Result<FolderDto, DomainError>;
 
     /// Lists folders within a parent folder
     async fn list_folders(&self, parent_id: Option<&str>) -> Result<Vec<FolderDto>, DomainError>;

@@ -1208,7 +1208,10 @@ async fn handle_mkcol(
         }
         accumulated_path.push_str(segment);
 
-        match folder_service.get_folder_by_path(&accumulated_path, user.id).await {
+        match folder_service
+            .get_folder_by_path(&accumulated_path, user.id)
+            .await
+        {
             Ok(existing) => {
                 parent_id = Some(existing.id);
             }
@@ -1443,7 +1446,9 @@ async fn handle_move(
             let move_dto = crate::application::dtos::folder_dto::MoveFolderDto {
                 parent_id: if dest_parent_path.is_empty() {
                     None
-                } else if let Ok(parent) = folder_service.get_folder_by_path(dest_parent_path, user.id).await
+                } else if let Ok(parent) = folder_service
+                    .get_folder_by_path(dest_parent_path, user.id)
+                    .await
                 {
                     assert_owner(
                         parent.owner_id.as_deref(),
@@ -1644,7 +1649,10 @@ async fn handle_copy(
 
     let target_parent_id = if dest_parent_path.is_empty() {
         None
-    } else if let Ok(parent) = folder_service.get_folder_by_path(dest_parent_path, user.id).await {
+    } else if let Ok(parent) = folder_service
+        .get_folder_by_path(dest_parent_path, user.id)
+        .await
+    {
         assert_owner(
             parent.owner_id.as_deref(),
             &user.id.to_string(),

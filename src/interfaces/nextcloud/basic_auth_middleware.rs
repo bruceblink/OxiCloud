@@ -168,22 +168,31 @@ pub async fn basic_auth_middleware(
             };
 
             // ── Resolve chroot from the Basic Auth drive marker ─────
-            // No marker → user's home folder. With a marker →
+            // No marker → caller's default personal drive's root folder
+            // (post-D0 every internal user has one — provisioned by the
+            // lifecycle hook via the atomic four-write transaction in
+            // §3 of docs/plan/drive.md). With a marker →
             // `get_folder_with_perms` enforces per-folder access (404
             // anti-enumeration on miss / no-read). Today this is the
             // sole chroot source; tomorrow it'll come from the
             // app-password row instead.
+            //
+            // Pre-D0 this lookup name-matched `"My Folder - <username>"`
+            // against the user's root folders; that broke after the
+            // wrapper was renamed to `"Personal"` and shared across all
+            // users — name-matching was the wrong axis. The drive lookup
+            // is the right one: name-independent, secondary-drive-safe.
             use crate::application::ports::folder_ports::FolderUseCase;
+            use crate::domain::repositories::drive_repository::DriveRepository;
             let chroot = match drive_marker.as_deref() {
                 None => {
-                    let expected = format!("My Folder - {}", current_user.username);
-                    match state
-                        .applications
-                        .folder_service
-                        .list_folders_with_perms(None, current_user.id)
-                        .await
-                    {
-                        Ok(folders) => folders.into_iter().find(|f| f.name == expected),
+                    match state.drive_repo.find_default_for_user(current_user.id).await {
+                        Ok(drive_with_name) => state
+                            .applications
+                            .folder_service
+                            .get_folder(&drive_with_name.drive.root_folder_id.to_string())
+                            .await
+                            .ok(),
                         Err(_) => None,
                     }
                 }
