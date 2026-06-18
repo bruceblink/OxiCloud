@@ -201,7 +201,9 @@ jobs:
       - name: Fail if fixtures are stale (rebuild + commit them)
         run: git diff --exit-code tests/fixtures/plugins/
       - name: Run plugin runtime tests
-        run: cargo test --features plugins plugins::
+        # Quote: the trailing `::` confuses GitHub's YAML parser (mapping
+        # values not allowed) and aborts the whole workflow at load time.
+        run: 'cargo test --features plugins plugins::'
 
   rust-test:
     name: Server Unit and Functionnal Tests
