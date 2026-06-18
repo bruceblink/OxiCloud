@@ -1,12 +1,22 @@
 <script lang="ts">
 	import { ui } from '$lib/stores/ui.svelte';
+	import { t } from '$lib/i18n/index.svelte';
 </script>
 
-<div class="toaster" role="region" aria-live="polite" aria-label="Notifications">
+<div
+	class="toaster"
+	role="region"
+	aria-live="polite"
+	aria-label={t('notifications.title', 'Notifications')}
+>
 	{#each ui.toasts as toast (toast.id)}
 		<div class="toast toast--{toast.kind}" role="status">
 			<span class="toast__msg">{toast.message}</span>
-			<button class="toast__close" aria-label="Dismiss" onclick={() => ui.dismiss(toast.id)}>
+			<button
+				class="toast__close"
+				aria-label={t('common.dismiss', 'Dismiss')}
+				onclick={() => ui.dismiss(toast.id)}
+			>
 				×
 			</button>
 		</div>

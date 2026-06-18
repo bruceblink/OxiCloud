@@ -303,7 +303,7 @@
 	<div class="top-bar" class:top-bar--search-active={searchActive}>
 		<button
 			class="sidebar-toggle"
-			aria-label="Toggle navigation menu"
+			aria-label={t('nav.toggle', 'Toggle navigation menu')}
 			aria-expanded={sidebarOpen}
 			onclick={() => (sidebarOpen = !sidebarOpen)}
 		>
@@ -357,7 +357,7 @@
 					class="search-button"
 					type="submit"
 					title={t('actions.search_btn', 'Search')}
-					aria-label="Search"
+					aria-label={t('actions.search_btn', 'Search')}
 				>
 					<Icon name="search" />
 				</button>

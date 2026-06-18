@@ -412,7 +412,7 @@
 						</ul>
 					{/if}
 				</div>
-				<select class="role-select" bind:value={newRole} aria-label={t('share.role', 'Role')}>
+				<select class="role-select" bind:value={newRole} aria-label={t('share.role_label', 'Role')}>
 					{#each ROLES as r (r.v)}<option value={r.v}>{r.l}</option>{/each}
 				</select>
 				{@render expiryChip(newExpiry, (v) => (newExpiry = v))}

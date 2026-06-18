@@ -44,7 +44,7 @@ export function sizeBucket(bytes: number | null | undefined): string {
 /** Human label for a resource `category` / type group-by bucket. */
 export function typeLabel(category: string): string {
 	const labels: Record<string, string> = {
-		Folder: t('groupby.type.folders', 'Folders'),
+		Folder: t('groupby.folders', 'Folders'),
 		Image: t('category.images', 'Images'),
 		Video: t('category.videos', 'Videos'),
 		Audio: t('category.audio', 'Audio'),
