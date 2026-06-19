@@ -22,8 +22,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # See ci.yml — required while login_v2_handler.rs uses include_str! against OUT_DIR.
-  OXICLOUD_RUST_ASSETS: "1"
 
 jobs:
   load:

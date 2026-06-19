@@ -29,6 +29,14 @@ struct DrivePickerTemplate {
     drives: Vec<DriveOption>,
 }
 
+/// The Nextcloud Login Flow v2 "Grant Access" page. Rendered server-side via
+/// askama (no template variables — the username/password are collected by the
+/// embedded form) instead of `include_str!` so the build no longer depends on
+/// the legacy `build.rs` static-asset pipeline / `OUT_DIR`.
+#[derive(Template)]
+#[template(path = "nextcloud/login.html")]
+struct NextcloudLoginTemplate;
+
 // Home identification is via `position_of_user_home_root_folder` from
 // `domain::repositories::drive_repository` — a generic helper that
 // keys off `drives.default_for_user == user_id` rather than folder
@@ -36,7 +44,7 @@ struct DrivePickerTemplate {
 // picker UX.
 
 /// Serve an HTML page with a Content-Security-Policy header as defense-in-depth.
-fn html_with_csp(html: &'static str) -> Response {
+fn html_with_csp(html: String) -> Response {
     (
         [(
             header::CONTENT_SECURITY_POLICY,
@@ -160,10 +168,13 @@ pub async fn handle_login_page(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    html_with_csp(include_str!(concat!(
-        env!("OUT_DIR"),
-        "/nextcloud-login.html"
-    )))
+    match NextcloudLoginTemplate.render() {
+        Ok(html) => html_with_csp(html),
+        Err(e) => {
+            tracing::error!(error = %e, "Login Flow v2: login page template render failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn handle_login_submit(

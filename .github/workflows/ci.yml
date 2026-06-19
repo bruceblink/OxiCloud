@@ -14,12 +14,6 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
   DATABASE_URL: "postgres://postgres:postgres@localhost/oxicloud_test"
-  # Re-enable the legacy build.rs static-dist + OUT_DIR HTML pipeline.
-  # Required while login_v2_handler.rs still uses
-  # `include_str!(concat!(env!("OUT_DIR"), "/nextcloud-login.html"))`;
-  # without this, every cargo job fails to compile that file.
-  # Remove once the Nextcloud login page moves off include_str! (askama).
-  OXICLOUD_RUST_ASSETS: "1"
 
 jobs:
 

@@ -25,7 +25,6 @@ const HTML_INCLUDE: &[&str] = &[
     "profile.html",
     "admin.html",
     "device-verify.html",
-    "nextcloud-login.html",
     "share.html",
 ];
 
@@ -1239,14 +1238,21 @@ fn fnv_hash(data: &[u8]) -> String {
     format!("{h:016x}")
 }
 
-/// Recursively copy a directory tree.
+/// Recursively copy a directory tree, following symlinks.
+///
+/// `fs::metadata` (not `entry.file_type()`) is used to classify each entry so
+/// that symlinked directories are traversed into rather than handed to
+/// `fs::copy`. `static/locales` is a symlink to `frontend/static/locales`;
+/// `entry.file_type()` reports the link itself, so the old code routed it to
+/// the `fs::copy` branch and failed with "the source path is neither a regular
+/// file nor a symlink to a regular file".
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
+        if fs::metadata(&src_path)?.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             fs::copy(&src_path, &dst_path)?;
