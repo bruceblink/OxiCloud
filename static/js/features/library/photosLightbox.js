@@ -37,6 +37,23 @@ export const photosLightbox = {
      */
     _showGeneration: 0,
 
+    /** @type {number} Current zoom factor (1 = fit) */
+    _zoom: 1,
+    /** @type {number} */
+    _panX: 0,
+    /** @type {number} */
+    _panY: 0,
+    /** @type {Map<number, {x: number, y: number}>} Active pointers (for pinch) */
+    _pointers: new Map(),
+    /** @type {number} */
+    _pinchStartDist: 0,
+    /** @type {number} */
+    _pinchStartZoom: 1,
+    /** @type {{x: number, y: number, panX: number, panY: number}|null} */
+    _dragStart: null,
+    /** @type {{x: number, y: number, t: number}|null} */
+    _swipeStart: null,
+
     /**
      * Register the photosView reference (called from photos.js to avoid circular imports).
      * @param {any} pv
@@ -93,6 +110,7 @@ export const photosLightbox = {
                 }
             }, 200);
         }
+        this._resetZoom();
         this._unbindKeys();
     },
 
@@ -129,11 +147,13 @@ export const photosLightbox = {
             <button class="lightbox-nav lightbox-next"><i class="fas fa-chevron-right"></i></button>
             <div class="lightbox-toolbar">
                 <button class="lb-fullres hidden" title="Full resolution"><i class="fas fa-expand"></i></button>
+                <button class="lb-info" title="Info"><i class="fas fa-circle-info"></i></button>
                 <button class="lb-download" title="Download"><i class="fas fa-download"></i></button>
                 <button class="lb-favorite" title="Favorite"><i class="far fa-star"></i></button>
                 <button class="lb-delete" title="Delete"><i class="fas fa-trash"></i></button>
             </div>
             <div class="lightbox-counter"></div>
+            <div class="lightbox-infopanel hidden"></div>
         `;
         document.body.appendChild(el);
         this._overlay = el;
@@ -151,6 +171,7 @@ export const photosLightbox = {
         });
 
         // Toolbar actions (`.lb-fullres` is wired per-item in `_show`)
+        /** @type {HTMLButtonElement} */ (el.querySelector('.lb-info')).onclick = () => this._toggleInfoPanel();
         /** @type {HTMLButtonElement} */ (el.querySelector('.lb-download')).onclick = () => this._download();
         /** @type {HTMLButtonElement} */ (el.querySelector('.lb-favorite')).onclick = () => this._toggleFavorite();
         /** @type {HTMLButtonElement} */ (el.querySelector('.lb-delete')).onclick = () => this._delete();
@@ -174,6 +195,7 @@ export const photosLightbox = {
     _show() {
         if (!this._overlay || this.index < 0) return;
         const generation = ++this._showGeneration;
+        this._resetZoom();
 
         const item = this.items[this.index];
         const content = this._overlay.querySelector('.lightbox-content');
@@ -246,6 +268,7 @@ export const photosLightbox = {
         let showingOriginal = isGif;
         const img = document.createElement('img');
         img.alt = item.name;
+        this._wireZoomPan(img);
 
         img.addEventListener('load', () => {
             if (generation !== this._showGeneration) return;
@@ -308,8 +331,7 @@ export const photosLightbox = {
                     parts.push(`${metadata.width}×${metadata.height}`);
                 }
                 metaEl.textContent = parts.join(' · ');
-
-                //TODO: add geoloc pointer to openstreetmap ?
+                this._fillInfoPanel(metadata, dateStr, sizeStr);
             }
         } catch (_err) {
             // Non-critical, keep existing meta
@@ -387,6 +409,156 @@ export const photosLightbox = {
         } catch (err) {
             console.error('Delete failed:', err);
         }
+    },
+
+    // ── Zoom / pan / swipe ──────────────────────────────────────────
+
+    /** @returns {HTMLImageElement|null} The image element currently shown. */
+    _currentImg() {
+        return /** @type {HTMLImageElement|null} */ (this._overlay?.querySelector('.lightbox-content img') || null);
+    },
+
+    /** Reset zoom/pan state (per item and on close). */
+    _resetZoom() {
+        this._zoom = 1;
+        this._panX = 0;
+        this._panY = 0;
+        this._pointers.clear();
+        this._pinchStartDist = 0;
+        this._dragStart = null;
+        this._swipeStart = null;
+    },
+
+    _applyTransform() {
+        const img = this._currentImg();
+        if (img) img.style.transform = `translate(${this._panX}px, ${this._panY}px) scale(${this._zoom})`;
+    },
+
+    /**
+     * Set the zoom factor (clamped 1–5), centered. Resets pan at 1.
+     * @param {number} z
+     */
+    _setZoom(z) {
+        z = Math.min(Math.max(z, 1), 5);
+        if (z === 1) {
+            this._panX = 0;
+            this._panY = 0;
+        }
+        this._zoom = z;
+        this._applyTransform();
+        const img = this._currentImg();
+        if (img) img.classList.toggle('is-zoomed', z > 1);
+    },
+
+    /**
+     * Wire wheel-zoom, double-click zoom, drag-pan, pinch-zoom and (when not
+     * zoomed) touch swipe-to-navigate onto a photo element.
+     * @param {HTMLImageElement} img
+     */
+    _wireZoomPan(img) {
+        img.style.transformOrigin = 'center center';
+        img.style.touchAction = 'none';
+
+        img.addEventListener(
+            'wheel',
+            (e) => {
+                e.preventDefault();
+                this._setZoom(this._zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2));
+            },
+            { passive: false }
+        );
+
+        img.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            this._setZoom(this._zoom > 1 ? 1 : 2.5);
+        });
+
+        img.addEventListener('pointerdown', (e) => {
+            img.setPointerCapture?.(e.pointerId);
+            this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (this._pointers.size === 2) {
+                const pts = [...this._pointers.values()];
+                this._pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+                this._pinchStartZoom = this._zoom;
+            } else {
+                this._dragStart = { x: e.clientX, y: e.clientY, panX: this._panX, panY: this._panY };
+                this._swipeStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+            }
+        });
+
+        img.addEventListener('pointermove', (e) => {
+            if (!this._pointers.has(e.pointerId)) return;
+            this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (this._pointers.size === 2 && this._pinchStartDist > 0) {
+                const pts = [...this._pointers.values()];
+                const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+                this._setZoom(this._pinchStartZoom * (dist / this._pinchStartDist));
+            } else if (this._zoom > 1 && this._dragStart) {
+                this._panX = this._dragStart.panX + (e.clientX - this._dragStart.x);
+                this._panY = this._dragStart.panY + (e.clientY - this._dragStart.y);
+                this._applyTransform();
+            }
+        });
+
+        const endPointer = (/** @type {PointerEvent} */ e) => {
+            const wasPinch = this._pointers.size === 2;
+            this._pointers.delete(e.pointerId);
+            if (!wasPinch && this._zoom === 1 && this._swipeStart && e.pointerType === 'touch') {
+                const dx = e.clientX - this._swipeStart.x;
+                const dy = e.clientY - this._swipeStart.y;
+                if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                    if (dx > 0) this.prev();
+                    else this.next();
+                }
+            }
+            if (wasPinch) this._pinchStartDist = 0;
+            this._dragStart = null;
+            this._swipeStart = null;
+        };
+        img.addEventListener('pointerup', endPointer);
+        img.addEventListener('pointercancel', endPointer);
+    },
+
+    // ── Info panel ──────────────────────────────────────────────────
+
+    /** Toggle the EXIF info panel. */
+    _toggleInfoPanel() {
+        this._overlay?.querySelector('.lightbox-infopanel')?.classList.toggle('hidden');
+    },
+
+    /**
+     * Populate the info panel from fetched EXIF metadata.
+     * @param {FileMetadata} metadata
+     * @param {string} dateStr
+     * @param {string} sizeStr
+     */
+    _fillInfoPanel(metadata, dateStr, sizeStr) {
+        const panel = this._overlay?.querySelector('.lightbox-infopanel');
+        if (!panel) return;
+        const item = this.items[this.index];
+        const rows = [this._infoRow('fa-image', item?.name || ''), this._infoRow('fa-calendar', dateStr)];
+        if (sizeStr) rows.push(this._infoRow('fa-hard-drive', sizeStr));
+        if (metadata.width && metadata.height) {
+            rows.push(this._infoRow('fa-ruler-combined', `${metadata.width} × ${metadata.height}`));
+        }
+        if (metadata.camera_make || metadata.camera_model) {
+            rows.push(this._infoRow('fa-camera', [metadata.camera_make, metadata.camera_model].filter(Boolean).join(' ')));
+        }
+        if (metadata.latitude != null && metadata.longitude != null) {
+            rows.push(this._infoRow('fa-location-dot', `${metadata.latitude.toFixed(5)}, ${metadata.longitude.toFixed(5)}`));
+        }
+        panel.innerHTML = rows.join('');
+    },
+
+    /**
+     * @param {string} icon FontAwesome class
+     * @param {string} text
+     * @returns {string}
+     */
+    _infoRow(icon, text) {
+        const d = document.createElement('div');
+        d.textContent = text;
+        return `<div class="lb-info-row"><i class="fas ${icon}"></i><span>${d.innerHTML}</span></div>`;
     },
 
     /** Keyboard navigation */

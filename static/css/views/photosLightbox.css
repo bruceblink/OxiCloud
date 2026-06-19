@@ -170,6 +170,45 @@
     z-index: 10001;
 }
 
+/* EXIF info panel */
+.lightbox-infopanel {
+    position: absolute;
+    top: 64px;
+    right: var(--space-4);
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-lightbox-btn-bg);
+    color: var(--color-lightbox-btn-text);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    z-index: 10001;
+}
+
+.lightbox-infopanel.hidden {
+    display: none;
+}
+
+.lb-info-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    word-break: break-word;
+}
+
+.lb-info-row i {
+    width: 18px;
+    text-align: center;
+    opacity: 0.8;
+}
+
+/* Zoomed photo shows a grab cursor for panning */
+.lightbox-content img.is-zoomed {
+    cursor: grab;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .lightbox-nav {
