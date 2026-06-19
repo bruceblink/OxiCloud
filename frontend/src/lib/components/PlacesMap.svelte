@@ -24,6 +24,10 @@
 	import { onDestroy, onMount } from 'svelte';
 
 	const BASEMAP_URL = '/basemaps/basemap.pmtiles';
+	// Bundled lightweight world outline (Natural Earth 110m, public domain),
+	// shown when no Protomaps .pmtiles basemap is installed so Places is never a
+	// blank background. Same-origin asset — no external tiles (CSP-friendly).
+	const WORLD_GEOJSON_URL = '/geo/world-110m.geojson';
 
 	let mapEl = $state<HTMLDivElement | null>(null);
 	let loading = $state(true);
@@ -63,16 +67,29 @@
 		return hasBasemap;
 	}
 
-	/** Minimal MapLibre style: themed background only (no basemap). */
-	function blankStyle(): Record<string, unknown> {
+	/**
+	 * Fallback basemap used when no Protomaps `.pmtiles` is installed: a themed
+	 * ocean with land masses and country borders drawn from the bundled Natural
+	 * Earth outline (`WORLD_GEOJSON_URL`). Gives Places a recognisable world map
+	 * — no street/label detail — without any per-instance basemap install.
+	 */
+	function worldStyle(): Record<string, unknown> {
+		const c = isDark()
+			? { ocean: '#0f172a', land: '#1f2a3a', border: '#3d4a5c' }
+			: { ocean: '#bcd4ea', land: '#eef1ee', border: '#aab6c4' };
 		return {
 			version: 8,
-			sources: {},
+			sources: {
+				world: { type: 'geojson', data: WORLD_GEOJSON_URL }
+			},
 			layers: [
+				{ id: 'ocean', type: 'background', paint: { 'background-color': c.ocean } },
+				{ id: 'land', type: 'fill', source: 'world', paint: { 'fill-color': c.land } },
 				{
-					id: 'bg',
-					type: 'background',
-					paint: { 'background-color': isDark() ? '#0f172a' : '#e8eef3' }
+					id: 'borders',
+					type: 'line',
+					source: 'world',
+					paint: { 'line-color': c.border, 'line-width': 0.6 }
 				}
 			]
 		};
@@ -179,7 +196,7 @@
 
 		map = new maplibregl.Map({
 			container: mapEl,
-			style: basemap ? basemapStyle() : blankStyle(),
+			style: basemap ? basemapStyle() : worldStyle(),
 			center: [0, 25],
 			zoom: 1.3,
 			attributionControl: false
@@ -202,6 +219,11 @@
 			clearTimeout(moveTimer);
 			moveTimer = window.setTimeout(() => void refreshClusters(false), 250);
 		});
+		// Tolerate a missing/misdeployed world outline quietly: the SPA fallback
+		// serves index.html (HTTP 200, text/html) for an absent /geo asset, which
+		// MapLibre can't parse as GeoJSON. Markers still render over the ocean
+		// layer, so swallow the source error instead of logging to the console.
+		map.on('error', () => {});
 	}
 
 	/** Fetch clusters for the current viewport and render them.
