@@ -4,6 +4,7 @@ pub mod calendar_event;
 pub mod contact;
 pub mod device_code;
 pub mod entity_errors;
+pub mod face;
 pub mod file;
 pub mod folder;
 pub mod magic_link_token;
