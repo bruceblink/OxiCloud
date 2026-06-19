@@ -618,11 +618,16 @@ accommodates them without schema migration)
 
 | URL | Resolves to |
 |---|---|
-| `/` (internal user) | Redirect to `/drive/<root-folder-id>` of the caller's default personal drive |
-| `/` (external user) | Redirect to `/sharedwithme` (no personal drive exists) |
-| `/drive/<folder-id>` | Folder view (root or descendant — drive context is recovered server-side from `folders.drive_id`) |
+| `/` (internal user) | Redirect to `/files/<root-folder-id>` of the caller's default personal drive |
+| `/` (external user) | Redirect to `/shared-with-me` (no personal drive exists) |
+| `/files` | Default browse — shows the caller's home root (back-compat) |
+| `/files/<folder-id>` | Folder view at this folder. Drive context is recovered server-side from `folders.drive_id`. Switching drives = navigating to the new drive's root folder id |
+| `/files/<a>/<b>/<c>` | Folder `c` (descendant of `b`, descendant of `a`). Each segment is a folder UUID; the prefix chain provides breadcrumbs without a server round-trip |
 | `/config/drive/<drive-uuid>` | Drive configuration surface (members, policies, quota). Page is permission-aware: owner sees member management; editor/viewer see a read-only "Drive info" view |
 | `/config/user/<user-uuid>` | (Future) User configuration — same shape so the `/config/<resource-type>/<uuid>` pattern is consistent across resources |
+| `/drive/<...>` | **Reserved** for future drive-scoped surfaces that aren't covered by `/files/` or `/config/drive/` |
+
+**Why `/files/<folder-id>` and not `/drive/<folder-id>`**: the existing files browser already takes a chain of folder UUIDs (`/files/<id1>/<id2>/<id3>`), with the leaf being the current folder and the prefix providing breadcrumbs. Switching drives just means navigating to a different root folder id under the same prefix — no new route shape required. Reserving `/drive/<...>` for later keeps the door open without forcing a migration now.
 
 **Why folder-id, not drive-uuid + folder-id**: every `storage.folders` row carries `drive_id` after D0, so a single folder UUID recovers the drive context in one cheap lookup. Stable across cross-drive moves (D6): bookmarks keep working when a folder hops drives, because the folder UUID doesn't change.
 
@@ -1377,7 +1382,7 @@ us a real rollback window while the new model bakes in production.
 |---|---|---|
 | **D-Prep — role_grants refactor** | `access_grants → role_grants` schema migration with role-bundle semantics. `Manage` Permission added to the enum + role bundle. Engine reads role_grants only; `access_grants` removed (after one dual-write release if compat is needed). API gains `role` parameter on grant endpoints; audit log emits one `role_grant.*` event per role assignment instead of N permission events. **No Drive concept yet.** Sets the foundation that all subsequent PRs build on. **Data shape confirmed**: empirical audit shows >99% of existing `access_grants` rows already cluster into the standard bundles (viewer/editor/owner) — the migration is mechanical for the vast majority of data; the <1% edge cases get absorbed by shipping `commenter` and `contributor` roles on day one or get an explicit per-row migration decision logged. | **Medium** — touches the load-bearing authorisation table, but the data shape removes the main migration risk |
 | **D0 — foundation** | `storage.drives` schema (no `drive_members` — uses `role_grants` from D-Prep); `Drive` domain entity; migration creating personal drives + backfilling `drive_id` on every resource; read-only `GET /api/drives` listing the caller's drives (single query: `SELECT … FROM role_grants WHERE subject_id=$caller AND resource_type='drive'`). Dual-write `user_id` alongside `drive_id` for safety. **No new UI.** **Every upload path stamps `drive_id` at insert**: classic multipart (`file_handler::upload`), chunked NC (`uploads_handler`), streaming CDC (`upload_ingest`), delta upload (`delta_upload_service`), instant upload by hash. Tantivy reindex (see §11) is part of this PR. **Provenance columns added** (see §14): `created_by` and `updated_by` on both `storage.folders` and `storage.files`, FK to `auth.users` with `ON DELETE SET NULL`; backfilled from `user_id` so pre-Drive content has provenance from day one; every mutation path that touches `updated_at` also sets `updated_by`. | **High** — every storage query touches, all upload paths touched |
-| **D1 — UI switcher + URL routing** | Sidebar drive picker, `/drive/<folder-id>` frontend route (drive context recovered server-side from `folders.drive_id`), `/config/drive/<drive-uuid>` for drive admin. `/` redirects to `/drive/<root-folder-id>` of the caller's default personal drive (internal users) or `/sharedwithme` (external users with no personal drive). WebDAV path dispatcher recognising `drives/<uuid>` as the drive-explicit prefix on `/webdav/` (NC keeps the credential-side scheme — see §9). | Medium |
+| **D1 — UI switcher + URL routing** | Sidebar drive picker, `/files/<folder-id>` reused for cross-drive navigation (existing route — drive context recovered server-side from `folders.drive_id`), `/config/drive/<drive-uuid>` new route for drive admin. `/` redirects to `/files/<root-folder-id>` of the caller's default personal drive (internal users) or `/shared-with-me` (external users with no personal drive). WebDAV path dispatcher recognising `drives/<uuid>` as the drive-explicit prefix on `/webdav/` (NC keeps the credential-side scheme — see §9). `/drive/<...>` reserved for future use. | Medium |
 | **D2 — drive membership API + per-drive trash auth** | `POST /api/drives/{id}/members`, `DELETE`, `PUT` for role changes — thin handlers that translate to `role_grants` INSERT/DELETE/UPDATE with `resource_type='drive'`. `Resource::Drive(Uuid)` (added in D-Prep at the enum level) gets its specialised handler surface here. Shared-drive last-owner protection. Group-as-subject support reuses the existing `subject_groups` machinery. **Personal-drive guards** (`add_member`, `remove_member`, `delete_drive` refuse on `kind='personal'` — see §2). **Per-drive trash authorisation** (§12): trash listing filters by drive(s) the caller can read; trash mutations (send/restore/permanent-delete) require `role='owner'` on the drive; `storage.trash_items` VIEW updated to surface `drive_id`; orphan/aborted-upload sweep becomes per-drive. | Medium |
 | **D3 — group-owned shared drives** | "Create shared drive" flow — admin or group owner triggers, drive created with `kind='shared'`, initial owner row is the group. Group-deletion guard refuses if the group is the last owner of any drive. Drive-rename, drive-delete. | Low |
 | **D4 — per-drive quota** | Move storage accounting off `auth.users.storage_used_bytes` onto `storage.drives.used_bytes`. **Re-point the existing per-user incremental CTE** (introduced in v0.7.0 — see `b5b80549`, `d6987329`) at drive rows; don't reinvent the counting logic. Upload paths check `drive.quota_bytes` instead of (or in addition to) the user's quota for the dual-write window. **Per-chunk incremental quota check on the NC chunked path** (see §13): MKCOL refuses when the drive is already over quota; each PUT chunk runs an O(1) `used + session_so_far + chunk_size > quota` test and refuses with 507 within one chunk of wasted upload. Closes a pre-existing wart where NC clients could upload GB before learning they were over quota. Reconciliation job runs once per day to fix drift. | Medium |
@@ -1659,15 +1664,15 @@ test`), **(c)** `cargo fmt && cargo clippy --all-features
   username (or app-password binding) lands a sync into the chosen
   drive transparently.
 - **Manual smoke (internal user)**: open `/`, get redirected to
-  `/drive/<default-personal-drive-root-folder-id>`. Click sidebar
-  drive switcher → URL updates to `/drive/<picked-drive-root-folder-id>`,
+  `/files/<default-personal-drive-root-folder-id>`. Click sidebar
+  drive switcher → URL updates to `/files/<picked-drive-root-folder-id>`,
   listing reloads. Drive picker shows all of the caller's drives
   (default first), each with its quota usage. Open
   `/config/drive/<personal-drive-uuid>` → owner sees member list +
   policies. Open `/config/drive/<shared-drive-uuid>` as a viewer →
   read-only "Drive info" surface.
 - **Manual smoke (external user)**: open `/`, get redirected to
-  `/sharedwithme` (no `/drive/...` for an account without a
+  `/shared-with-me` (no `/files/<id>` for an account without a
   personal drive).
 - **Playwright**: a new `tests/e2e/drive-switching.spec.ts` exercises
   sidebar → URL → listing → cross-drive isolation (folders in

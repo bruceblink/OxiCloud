@@ -44,6 +44,7 @@
 	import { lazyComponent } from '$lib/composables/lazyComponent.svelte';
 	import { t } from '$lib/i18n/index.svelte';
 	import { confirmDialog, promptDialog } from '$lib/stores/dialogs.svelte';
+	import { drives as drivesStore, driveIcon } from '$lib/stores/drives.svelte';
 	import { files as filesStore } from '$lib/stores/files.svelte';
 	import { session } from '$lib/stores/session.svelte';
 	import { ui } from '$lib/stores/ui.svelte';
@@ -67,6 +68,17 @@
 	// The URL rest param is the trail of folder ids from home's children down.
 	// /files → home root; /files/a/b → folder b inside a inside home.
 	const pathSegments = $derived((page.params.path ?? '').split('/').filter((s) => s.length > 0));
+
+	// First-crumb icon mirrors the drive at pathSegments[0]: `home` for the
+	// default-personal, `folder` for a secondary personal, `users` for a
+	// shared drive. Falls back to `home` while the drives list is loading
+	// or when the URL's leading segment isn't a known drive root (deep-link
+	// into a sub-folder bypasses drive identification — same limitation as
+	// the breadcrumb name resolution).
+	const rootIcon = $derived.by(() => {
+		const drive = drivesStore.findByRootFolderId(pathSegments[0] ?? null);
+		return drive ? driveIcon(drive) : 'home';
+	});
 
 	let listing = $state<FolderListing>({ folders: [], files: [], favoriteIds: [], sharedIds: [] });
 	let crumbs = $state<Array<{ id: string; name: string }>>([]);
@@ -170,6 +182,21 @@
 			return;
 		}
 		const home = await session.loadHomeFolder();
+
+		// Canonicalize bare `/files` → `/files/<last-chosen-drive-root>` (or
+		// the default drive's root when there's no memory yet). Keeps the URL
+		// explicit, the breadcrumb populated, and the drive picker correctly
+		// highlighted. The DrivePicker writes `oxi-last-drive-root` on click.
+		if (pathSegments.length === 0) {
+			const last =
+				typeof localStorage !== 'undefined' ? localStorage.getItem('oxi-last-drive-root') : null;
+			const target = last ?? home;
+			if (target) {
+				await goto(`/files/${target}`, { replaceState: true });
+				return;
+			}
+		}
+
 		const folderId = pathSegments.at(-1) ?? home;
 		if (!folderId) {
 			error = t('files.no_home', 'No home folder available.');
@@ -194,6 +221,8 @@
 		}, 100);
 
 		// Breadcrumbs resolve independently so they never block the grid paint.
+		// Bare `/files` was canonicalized above to `/files/<id>` so pathSegments
+		// is always non-empty here for internal users.
 		void buildCrumbs(pathSegments).then((trail) => {
 			if (seq === loadSeq) crumbs = trail;
 		});
@@ -1277,26 +1306,27 @@
 		</ListToolbar>
 
 		<nav class="breadcrumb" aria-label="Breadcrumb">
-			<a
-				href="/files"
-				class="breadcrumb-item breadcrumb-home breadcrumb-link"
-				title={t('breadcrumb.home', 'Home')}
-				ondragover={(e) => e.dataTransfer?.types.includes(DRAG_TYPE) && e.preventDefault()}
-				ondrop={(e) => session.homeFolderId && onCrumbDrop(e, session.homeFolderId)}
-			>
-				<Icon name="home" />
-			</a>
 			{#each crumbs as c, i (c.id)}
-				<span class="breadcrumb-separator">&gt;</span>
+				{#if i > 0}
+					<span class="breadcrumb-separator">&gt;</span>
+				{/if}
 				{#if i === crumbs.length - 1}
-					<span class="breadcrumb-item breadcrumb-current">{c.name}</span>
+					<span class="breadcrumb-item breadcrumb-current" class:breadcrumb-home={i === 0}>
+						{#if i === 0}<Icon name={rootIcon} />{/if}
+						{c.name}
+					</span>
 				{:else}
 					<a
 						href={crumbHref(i)}
 						class="breadcrumb-item breadcrumb-link"
+						class:breadcrumb-home={i === 0}
+						title={i === 0 ? t('breadcrumb.home', 'Home') : undefined}
 						ondragover={(e) => e.dataTransfer?.types.includes(DRAG_TYPE) && e.preventDefault()}
-						ondrop={(e) => onCrumbDrop(e, c.id)}>{c.name}</a
+						ondrop={(e) => onCrumbDrop(e, c.id)}
 					>
+						{#if i === 0}<Icon name={rootIcon} />{/if}
+						{c.name}
+					</a>
 				{/if}
 			{/each}
 		</nav>

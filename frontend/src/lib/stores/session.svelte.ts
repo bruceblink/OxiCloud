@@ -7,7 +7,7 @@
  * folder and land on the shared-with-me view.
  */
 import { fetchMe, tryRefresh } from '$lib/api/endpoints/auth';
-import { listRootFolders } from '$lib/api/endpoints/folders';
+import { drives } from '$lib/stores/drives.svelte';
 import type { User } from '$lib/api/types';
 
 class SessionStore {
@@ -41,20 +41,21 @@ class SessionStore {
 	}
 
 	/**
-	 * Resolve the home folder (first entry of GET /api/folders). Externals
-	 * (grant-only) have no home folder, so this is skipped for them.
+	 * Resolve the caller's default personal drive's root folder — the landing
+	 * point for `/files` and the `/` redirect. Externals (grant-only) have no
+	 * personal drive, so this is skipped for them.
+	 *
+	 * Identifies the default via `default_for_user`, not folder name: users
+	 * can rename "Personal" without breaking this lookup.
 	 */
 	async loadHomeFolder(): Promise<string | null> {
 		if (this.homeFolderId) return this.homeFolderId;
 		if (this.isExternalUser) return null;
-		try {
-			const folders = await listRootFolders();
-			if (folders.length > 0) {
-				this.homeFolderId = folders[0].id;
-				this.homeFolderName = folders[0].name;
-			}
-		} catch {
-			/* leave null — caller handles */
+		await drives.load();
+		const def = drives.findDefault();
+		if (def) {
+			this.homeFolderId = def.root_folder_id;
+			this.homeFolderName = def.name;
 		}
 		return this.homeFolderId;
 	}

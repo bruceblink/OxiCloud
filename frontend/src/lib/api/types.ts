@@ -196,3 +196,24 @@ export interface SearchResults {
 	query_time_ms: number;
 	sort_by: string;
 }
+
+export type DriveKind = 'personal' | 'shared';
+
+/**
+ * One row from `GET /api/drives`. Mirrors `DriveDto` in
+ * `src/application/dtos/drive_dto.rs`. `default_for_user` is the caller's
+ * id when present, `null`/undefined otherwise — used to pick the default
+ * personal drive without hard-coding name conventions.
+ */
+export interface Drive {
+	id: string;
+	name: string;
+	kind: DriveKind;
+	default_for_user?: string | null;
+	root_folder_id: string;
+	quota_bytes?: number | null;
+	used_bytes: number;
+	policies: Record<string, unknown>;
+	created_at: string;
+	updated_at: string;
+}

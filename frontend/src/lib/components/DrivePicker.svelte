@@ -1,0 +1,160 @@
+<script lang="ts">
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { onMount } from 'svelte';
+
+	import type { Drive } from '$lib/api/types';
+	import Icon from '$lib/icons/Icon.svelte';
+	import { t } from '$lib/i18n/index.svelte';
+	import { drives as drivesStore, driveIcon } from '$lib/stores/drives.svelte';
+	import { formatBytes } from '$lib/utils/format';
+
+	interface Props {
+		onnavigate?: () => void;
+	}
+	let { onnavigate }: Props = $props();
+
+	// URL of `/files/<first>/<second>/...` — the first segment identifies the
+	// drive root the user navigated through. We use it to highlight the active
+	// drive in the picker. Deep-linking to a descendant folder of a non-default
+	// drive bypasses this highlight (the URL's leading segment is the deep
+	// folder id, not the drive root); that's acceptable — D2 can refine this
+	// by resolving `folder.drive_id` server-side when the gap matters.
+	const firstFilesSegment = $derived.by(() => {
+		const m = /^\/files\/([^/]+)/.exec(page.url.pathname);
+		return m ? m[1] : null;
+	});
+
+	// Sorting: default-personal drive first, then secondary personals, then
+	// shared. Within each group, by name. Picker UX puts "home" at the top so
+	// the common case is one click.
+	const sortedDrives = $derived(
+		[...drivesStore.drives].sort((a, b) => {
+			const rank = (d: Drive) => (d.default_for_user ? 0 : d.kind === 'personal' ? 1 : 2);
+			const r = rank(a) - rank(b);
+			return r !== 0 ? r : a.name.localeCompare(b.name);
+		})
+	);
+
+	function isActive(d: Drive): boolean {
+		return firstFilesSegment === d.root_folder_id;
+	}
+
+	function pctUsed(d: Drive): number | null {
+		if (!d.quota_bytes || d.quota_bytes <= 0) return null;
+		return Math.min(100, (d.used_bytes / d.quota_bytes) * 100);
+	}
+
+	async function open(d: Drive) {
+		onnavigate?.();
+		// Remember which drive root the user picked so a later click on the
+		// sidebar "Files" link (which goes to bare `/files`) returns here
+		// instead of always bouncing to the default drive.
+		try {
+			localStorage.setItem('oxi-last-drive-root', d.root_folder_id);
+		} catch {
+			/* private mode / quota — silently fall back to default */
+		}
+		await goto(`/files/${d.root_folder_id}`);
+	}
+
+	onMount(() => {
+		void drivesStore.load();
+	});
+</script>
+
+{#if drivesStore.loaded && drivesStore.drives.length > 0}
+	<ul class="drive-picker" aria-label={t('drive.picker', 'Drives')}>
+		{#each sortedDrives as d (d.id)}
+			<li>
+				<button
+					type="button"
+					class="drive-picker__item"
+					class:drive-picker__item--active={isActive(d)}
+					onclick={() => open(d)}
+					title={pctUsed(d) !== null
+						? `${d.name} — ${formatBytes(d.used_bytes)} / ${formatBytes(d.quota_bytes ?? 0)}`
+						: `${d.name} — ${formatBytes(d.used_bytes)}`}
+				>
+					<Icon name={driveIcon(d)} />
+					<span class="drive-picker__name">{d.name}</span>
+				</button>
+				{#if pctUsed(d) !== null}
+					<div
+						class="drive-picker__bar"
+						role="progressbar"
+						aria-valuenow={Math.round(pctUsed(d) ?? 0)}
+						aria-valuemin="0"
+						aria-valuemax="100"
+						aria-label={t('drive.usage_aria', 'Drive usage')}
+					>
+						<div class="drive-picker__bar-fill" style:width="{pctUsed(d)}%"></div>
+					</div>
+				{/if}
+			</li>
+		{/each}
+	</ul>
+{/if}
+
+<style>
+	/* Rendered as nested children under the "Files" nav item — no own border or
+	   title; visual nesting via left padding aligned to the parent icon. */
+	.drive-picker {
+		list-style: none;
+		padding: 0;
+		margin: 0 0 0.25rem;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.drive-picker__item {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		width: 100%;
+		padding: 0.3rem 1rem 0.3rem 2rem;
+		background: transparent;
+		border: none;
+		color: var(--color-sidebar-text);
+		font: inherit;
+		font-size: 0.85rem;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.drive-picker__item:hover {
+		background: var(--color-sidebar-hover-bg);
+		color: var(--color-sidebar-text-hover);
+	}
+
+	/* Active drive: just a text-color shift. The parent "Files" row already
+	   carries the orange-tinted active bg — anything more on the child
+	   crowds the sidebar. Typography alone reads as "you are here" since
+	   only one drive can be active at a time. */
+	.drive-picker__item--active {
+		color: var(--color-sidebar-text-active);
+		font-weight: var(--weight-semibold);
+	}
+
+	.drive-picker__name {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* Mini usage bar tucked under the row, indented to align with the name. */
+	.drive-picker__bar {
+		height: 3px;
+		background: var(--color-sidebar-storage-bar);
+		border-radius: 1.5px;
+		margin: 0 1rem 0.25rem 2rem;
+		overflow: hidden;
+	}
+
+	.drive-picker__bar-fill {
+		height: 100%;
+		background: var(--color-accent);
+		transition: width 200ms ease;
+	}
+</style>

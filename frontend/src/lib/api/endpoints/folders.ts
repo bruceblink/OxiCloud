@@ -103,11 +103,6 @@ function parseListing(raw: unknown): FolderListing {
 	};
 }
 
-/** Top-level folders for the user; the first entry is the home folder. */
-export function listRootFolders(): Promise<FolderItem[]> {
-	return apiJson<FolderItem[]>('/api/folders', { credentials: 'same-origin' });
-}
-
 export async function getFolder(id: string): Promise<FolderItem> {
 	const folder = await apiJson<FolderItem>(`/api/folders/${id}`, NO_CACHE);
 	rememberFolderName(folder.id, folder.name);

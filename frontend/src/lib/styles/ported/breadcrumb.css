@@ -47,12 +47,14 @@
     user-select: none;
 }
 
+/* First crumb (drive root) — icon sits inline with the drive name. The home
+   icon plays the role of the standalone "home" button in earlier designs;
+   here it visually fuses with the root crumb so the chain reads
+   "🏠 Personal > Documents" instead of "🏠 > Personal > Documents". */
 .breadcrumb-home {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
+    gap: 0.35em;
     border-radius: var(--radius-sm);
 }
 

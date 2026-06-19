@@ -7,6 +7,8 @@
 	import { fileInlineUrl } from '$lib/api/endpoints/files';
 	import type { FileItem, FolderItem } from '$lib/api/types';
 	import { lazyComponent } from '$lib/composables/lazyComponent.svelte';
+	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import DrivePicker from '$lib/components/DrivePicker.svelte';
 	import Icon from '$lib/icons/Icon.svelte';
 	import { iconNameFromClass } from '$lib/utils/display';
 	import { userInitials, avatarColorIndex } from '$lib/utils/avatar';
@@ -281,6 +283,9 @@
 				<Icon name={link.icon} />
 				<span>{link.label}</span>
 			</a>
+			{#if link.href === '/files' && !session.isExternalUser}
+				<DrivePicker onnavigate={() => (sidebarOpen = false)} />
+			{/if}
 		{/each}
 	</nav>
 
