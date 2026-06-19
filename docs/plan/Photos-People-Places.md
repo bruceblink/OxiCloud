@@ -50,7 +50,7 @@ migrations, and a **vanilla-JS / vanilla-CSS** frontend (design tokens from
 - **Deviations from the original plan:** 1.5 serves the basemap as a *static file* (ServeDir Range) instead of the `pmtiles` Rust crate; 1.8 uses MapLibre HTML markers instead of a deck.gl `IconLayer`. Both keep the footprint minimal and need zero new backend code.
 - **Pending:** browser smoke-test, and an operator-supplied `static/basemaps/basemap.pmtiles` for the street backdrop (works without it).
 
-**Phase 2 — People: backend + frontend landed; real face model pending.**
+**Phase 2 — People: complete (detector/embedder shipped, opt-in).**
 - **Migration** (`…_faces.sql`): `faces` schema with `faces.persons` + `faces.faces`.
   **Deviation from 2.2:** embeddings stored as **`BYTEA`** (512×`f32` little-endian), **no
   `pgvector`** — cosine similarity runs in Rust. This keeps the extension footprint at
@@ -72,9 +72,18 @@ migrations, and a **vanilla-JS / vanilla-CSS** frontend (design tokens from
 - **Indexing:** `FaceIndexingService` implements `FileLifecycleHook` — background
   detect+embed on image create/copy/update, **dedup by blob hash**. Driven by the
   analyzer port; with the no-op analyzer it does nothing.
-- **Analyzer (placeholder):** `NoopFaceAnalyzer` (`is_ready()=false`, returns no faces) so
-  the whole stack compiles and runs **without any ML model**. The real ONNX analyzer is
-  the one remaining backend piece (see below).
+- **Analyzer:** two implementations behind `FaceAnalyzerPort`. `NoopFaceAnalyzer`
+  (`is_ready()=false`) is the default so the stack compiles/runs **without any ML model**.
+  `OnnxFaceAnalyzer` (`12ede47`, behind the **`faces-onnx`** cargo feature) is the real
+  SCRFD+ArcFace pipeline; `di::build_face_analyzer` picks it when the feature is compiled in
+  and runtime+models are configured, else degrades to the no-op (logged) so startup never
+  fails. **Deviation from 2.4:** the error-prone math (SCRFD anchor decode, NMS, the
+  closed-form similarity alignment, affine warp, normalization) lives in `face_geometry.rs`,
+  compiled in **every** build and covered by 11 unit tests; only the ONNX session calls are
+  feature-gated (and untestable here, no models). `ort` uses **load-dynamic** so
+  `libonnxruntime` is dlopen'd at runtime and the crate builds without it; loading goes
+  through `ort::init_from` (fallible) not ORT's lazy loader, which would `panic` under
+  `panic = "abort"`.
 - **HTTP:** `people_handler.rs` + routes (gated on `people_service.is_some()`):
   `GET /api/people`, `/api/people/{id}/photos`, `PATCH /api/people/{id}`,
   `POST /api/people/merge`, `/api/people/recluster`, `GET /api/people/data`,
@@ -84,10 +93,14 @@ migrations, and a **vanilla-JS / vanilla-CSS** frontend (design tokens from
   `Modal.prompt` + `PATCH`. Wired into the Photos sub-nav as a third **People** tab that a
   capability probe (`GET /api/people`) reveals only when faces are on; otherwise hidden.
   i18n keys in `en.json` (others fall back to English).
-- **Pending:** **2.4 real ONNX analyzer** — add `ort` (load-dynamic) + an operator-supplied
-  SCRFD/RetinaFace detector and ArcFace/EdgeFace embedder, implementing `FaceAnalyzerPort`.
-  Adds the `ort` crate and can't be exercised in this environment (no models). Per-user
-  opt-in consent gate (2.1) and lightbox face-box tagging (2.8) also still open.
+- **Config (2.4):** `FacesConfig` + `OXICLOUD_FACES_{ORT_DYLIB,DETECTOR_MODEL,
+  EMBEDDER_MODEL,DET_SIZE,DET_THRESHOLD,NMS_THRESHOLD,INTRA_THREADS}` (documented in
+  `example.env`). To run faces: build `--features faces-onnx`, set `OXICLOUD_ENABLE_FACES=true`,
+  and point the three model/runtime paths at an operator-supplied ONNX Runtime +
+  SCRFD detector + ArcFace embedder (e.g. InsightFace `buffalo_l`). Nothing is committed.
+- **Still open (optional):** per-user opt-in consent gate (2.1), lightbox face-box tagging
+  (2.8), and the periodic full re-cluster job (2.6 has on-demand `recluster`; no scheduler
+  yet). End-to-end smoke-test needs real models + a browser, which only you can run.
 
 ---
 
