@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::domain::entities::file::File;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use super::display_helpers::{
     category_for, format_file_size, icon_class_for, icon_special_class_for,
@@ -75,6 +76,19 @@ pub struct FileDto {
     /// through `If-Match` / `If-None-Match` on download / mutation
     /// endpoints without a separate HEAD round-trip.
     pub etag: String,
+
+    /// §14 provenance: user that originally created this file.
+    /// `None` when the referenced user has been deleted (FK is
+    /// `ON DELETE SET NULL`) or for stub/legacy files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<Uuid>,
+
+    /// §14 provenance: user that performed the most recent mutation
+    /// that bumped `updated_at`. Authorship signal — distinct from
+    /// `owner_id`. `None` when the referenced user is deleted or for
+    /// stub/legacy files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<Uuid>,
 }
 
 impl From<File> for FileDto {
@@ -114,6 +128,8 @@ impl From<File> for FileDto {
             sort_date: None,
             content_hash,
             etag,
+            created_by: parts.created_by,
+            updated_by: parts.updated_by,
         }
     }
 }
@@ -171,6 +187,8 @@ impl FileDto {
             content_hash: String::new(),
             etag: String::new(),
             sort_date: None,
+            created_by: None,
+            updated_by: None,
         }
     }
 }

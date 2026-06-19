@@ -273,6 +273,9 @@ pub async fn list_favorites_resources(
                             icon_class: std::sync::Arc::from("fas fa-folder"),
                             icon_special_class: std::sync::Arc::from("folder-icon"),
                             category: std::sync::Arc::from("Folder"),
+                            // §14 provenance not selected by the favorites query.
+                            created_by: None,
+                            updated_by: None,
                         };
                         FavoritesResourceItemDto {
                             resource_type: ResourceTypeDto::Folder,
@@ -316,6 +319,9 @@ pub async fn list_favorites_resources(
                             sort_date: None,
                             content_hash,
                             etag,
+                            // §14 provenance not selected by the favorites query.
+                            created_by: None,
+                            updated_by: None,
                         };
                         FavoritesResourceItemDto {
                             resource_type: ResourceTypeDto::File,

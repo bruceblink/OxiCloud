@@ -44,12 +44,20 @@ pub trait FileUploadUseCase: Send + Sync + 'static {
     /// Register a new file row pointing at an already-ingested blob.
     ///
     /// Takes ownership of the blob's reference (released on failure).
+    ///
+    /// `caller_id` is plumbed down into
+    /// `FileWritePort::save_file_with_blob` so the §14 `created_by` /
+    /// `updated_by` columns record the principal performing the upload —
+    /// not the parent folder's owner. D2 shared drives surface this
+    /// most clearly: Adam upload into Alice's folder must record
+    /// `created_by = adam.id`.
     async fn upload_file_streaming(
         &self,
         name: String,
         folder_id: Option<String>,
         content_type: String,
         blob: StoredBlob,
+        caller_id: Uuid,
     ) -> Result<FileDto, DomainError>;
 
     /// Replace the content of the file at `path` with an already-ingested
@@ -61,6 +69,12 @@ pub trait FileUploadUseCase: Send + Sync + 'static {
     /// and the parent-folder resolution (`get_parent_folder_id`) — the
     /// handler is responsible for deriving it from its protocol context
     /// (NC chroot, native default-drive lookup, WOPI default-drive).
+    ///
+    /// `caller_id` is plumbed down into
+    /// `FileWritePort::update_file_content_with_blob` so the §14
+    /// `updated_by` column reflects the principal that performed the
+    /// PUT — not the file's existing owner (D2 shared drives let
+    /// non-owners overwrite content).
     async fn update_file_streaming(
         &self,
         path: &str,
@@ -68,6 +82,7 @@ pub trait FileUploadUseCase: Send + Sync + 'static {
         blob: StoredBlob,
         content_type: &str,
         modified_at: Option<i64>,
+        caller_id: Uuid,
     ) -> Result<FileDto, DomainError>;
 }
 

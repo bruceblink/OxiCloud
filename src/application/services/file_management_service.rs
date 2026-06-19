@@ -98,6 +98,7 @@ impl FileManagementService {
         &self,
         file_id: &str,
         folder_id: Option<String>,
+        caller_id: Uuid,
     ) -> Result<FileDto, DomainError> {
         info!(
             "Moving file with ID: {} to folder: {:?}",
@@ -106,7 +107,7 @@ impl FileManagementService {
 
         let moved_file = self
             .file_repository
-            .move_file(file_id, folder_id)
+            .move_file(file_id, folder_id, caller_id)
             .await
             .map_err(|e| {
                 error!("Error moving file (ID: {}): {}", file_id, e);
@@ -128,6 +129,7 @@ impl FileManagementService {
         file_id: &str,
         target_folder_id: Option<String>,
         new_name: Option<&str>,
+        caller_id: Uuid,
     ) -> Result<FileDto, DomainError> {
         info!(
             "Copying file with ID: {} to folder: {:?} as {:?}",
@@ -136,7 +138,7 @@ impl FileManagementService {
 
         let copied_file = self
             .file_repository
-            .copy_file(file_id, target_folder_id, new_name)
+            .copy_file(file_id, target_folder_id, new_name, caller_id)
             .await
             .map_err(|e| {
                 error!("Error copying file (ID: {}): {}", file_id, e);
@@ -157,7 +159,12 @@ impl FileManagementService {
         Ok(dto)
     }
 
-    async fn rename_file(&self, file_id: &str, new_name: &str) -> Result<FileDto, DomainError> {
+    async fn rename_file(
+        &self,
+        file_id: &str,
+        new_name: &str,
+        caller_id: Uuid,
+    ) -> Result<FileDto, DomainError> {
         if let Err(reason) = validate_storage_name(new_name) {
             return Err(DomainError::validation_error(format!(
                 "Invalid file name '{new_name}': {reason}"
@@ -168,7 +175,7 @@ impl FileManagementService {
 
         let renamed_file = self
             .file_repository
-            .rename_file(file_id, new_name)
+            .rename_file(file_id, new_name, caller_id)
             .await
             .map_err(|e| {
                 error!("Error renaming file (ID: {}): {}", file_id, e);
@@ -253,7 +260,7 @@ impl FileManagementUseCase for FileManagementService {
             .await?;
         self.require_target_folder_perm(folder_id.as_deref(), Permission::Create, caller_id)
             .await?;
-        self.move_file(file_id, folder_id).await
+        self.move_file(file_id, folder_id, caller_id).await
     }
 
     async fn copy_file_with_perms(
@@ -268,7 +275,7 @@ impl FileManagementUseCase for FileManagementService {
             .await?;
         self.require_target_folder_perm(target_folder_id.as_deref(), Permission::Create, caller_id)
             .await?;
-        self.copy_file(file_id, target_folder_id, new_name.as_deref())
+        self.copy_file(file_id, target_folder_id, new_name.as_deref(), caller_id)
             .await
     }
 
@@ -280,7 +287,7 @@ impl FileManagementUseCase for FileManagementService {
     ) -> Result<FileDto, DomainError> {
         self.require_file_perm(file_id, Permission::Update, caller_id)
             .await?;
-        self.rename_file(file_id, new_name).await
+        self.rename_file(file_id, new_name, caller_id).await
     }
 
     async fn delete_file_with_perms(&self, id: &str, caller_id: Uuid) -> Result<(), DomainError> {

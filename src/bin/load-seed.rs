@@ -235,10 +235,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     let admin_root_id = admin_root.0;
 
-    let shared_subtree =
-        build_subtree(&pool, admin.id, admin_root_id, "shared_root", args.depth, args.fanout).await?;
-    let group_subtree =
-        build_subtree(&pool, admin.id, admin_root_id, "group_root", args.depth, args.fanout).await?;
+    let shared_subtree = build_subtree(
+        &pool,
+        admin.id,
+        admin_root_id,
+        "shared_root",
+        args.depth,
+        args.fanout,
+    )
+    .await?;
+    let group_subtree = build_subtree(
+        &pool,
+        admin.id,
+        admin_root_id,
+        "group_root",
+        args.depth,
+        args.fanout,
+    )
+    .await?;
 
     let total_folders = shared_subtree.all_ids.len() as u64 + group_subtree.all_ids.len() as u64;
     let total_leaves = shared_subtree.leaves.len() + group_subtree.leaves.len();

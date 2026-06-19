@@ -417,6 +417,7 @@ impl ChunkedUploadHandler {
                 parts.folder_id.clone(),
                 ingested.content_type.clone(),
                 ingested.stored(),
+                auth_user.id,
             )
             .await
         {

@@ -623,6 +623,7 @@ impl DeltaUploadService {
                         Some(folder_id.clone()),
                         content_type,
                         blob,
+                        caller_id,
                     )
                     .await
             }

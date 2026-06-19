@@ -284,6 +284,7 @@ impl FileHandler {
                         folder_id,
                         ingested.content_type.clone(),
                         ingested.stored(),
+                        auth_user.id,
                     )
                     .await
                 {

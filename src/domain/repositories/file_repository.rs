@@ -78,6 +78,9 @@ pub trait FileWriteRepository: Send + Sync + 'static {
 
     /// Registers a file row pointing at a blob already stored in the
     /// content-addressable chunk store (one blob reference is consumed).
+    ///
+    /// `caller_id` stamps both `created_by` and `updated_by`
+    /// (§14 provenance).
     async fn save_file_with_blob(
         &self,
         name: String,
@@ -85,17 +88,26 @@ pub trait FileWriteRepository: Send + Sync + 'static {
         content_type: String,
         blob_hash: &str,
         size: u64,
+        caller_id: Uuid,
     ) -> Result<File, DomainError>;
 
-    /// Moves a file to another folder.
+    /// Moves a file to another folder. `caller_id` stamps `updated_by`
+    /// in the same UPDATE that bumps `updated_at` (§14 provenance).
     async fn move_file(
         &self,
         file_id: &str,
         target_folder_id: Option<String>,
+        caller_id: Uuid,
     ) -> Result<File, DomainError>;
 
-    /// Renames a file (same folder, different name).
-    async fn rename_file(&self, file_id: &str, new_name: &str) -> Result<File, DomainError>;
+    /// Renames a file (same folder, different name). `caller_id`
+    /// stamps `updated_by` in the same UPDATE (§14 provenance).
+    async fn rename_file(
+        &self,
+        file_id: &str,
+        new_name: &str,
+        caller_id: Uuid,
+    ) -> Result<File, DomainError>;
 
     /// Deletes a file.
     async fn delete_file(&self, id: &str) -> Result<(), DomainError>;
@@ -108,24 +120,31 @@ pub trait FileWriteRepository: Send + Sync + 'static {
     ///
     /// Returns `(File, PathBuf)` where `PathBuf` is the destination path for
     /// the deferred write that the `WriteBehindCache` will perform.
+    ///
+    /// `caller_id` stamps both `created_by` and `updated_by`
+    /// (§14 provenance).
     async fn register_file_deferred(
         &self,
         name: String,
         folder_id: Option<String>,
         content_type: String,
         size: u64,
+        caller_id: Uuid,
     ) -> Result<(File, PathBuf), DomainError>;
 
     // ── Trash operations ──
 
-    /// Moves a file to the trash
-    async fn move_to_trash(&self, file_id: &str) -> Result<(), DomainError>;
+    /// Moves a file to the trash. `caller_id` stamps `updated_by`
+    /// (§14 provenance).
+    async fn move_to_trash(&self, file_id: &str, caller_id: Uuid) -> Result<(), DomainError>;
 
-    /// Restores a file from the trash to its original location
+    /// Restores a file from the trash to its original location.
+    /// `caller_id` stamps `updated_by` (§14 provenance).
     async fn restore_from_trash(
         &self,
         file_id: &str,
         original_path: &str,
+        caller_id: Uuid,
     ) -> Result<(), DomainError>;
 
     /// Permanently deletes a file (used by the trash)

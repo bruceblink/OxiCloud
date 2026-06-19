@@ -209,6 +209,7 @@ impl FileUploadService {
                     size: metadata.size,
                     is_new_blob: false,
                 },
+                caller_id,
             )
             .await?;
 
@@ -255,7 +256,7 @@ impl FileUploadService {
         let file = file_read.get_file(file_id).await?;
         let (new_hash, updated_at) = self
             .file_write
-            .update_file_content_with_blob(file_id, &blob.hash, blob.size, None)
+            .update_file_content_with_blob(file_id, &blob.hash, blob.size, None, caller_id)
             .await?;
         // The file maps to a different blob now — stale cached content must
         // never be served for the rest of its TTI window.
@@ -326,10 +327,18 @@ impl FileUploadUseCase for FileUploadService {
         folder_id: Option<String>,
         content_type: String,
         blob: StoredBlob,
+        caller_id: Uuid,
     ) -> Result<FileDto, DomainError> {
         let file = self
             .file_write
-            .save_file_with_blob(name.clone(), folder_id, content_type, &blob.hash, blob.size)
+            .save_file_with_blob(
+                name.clone(),
+                folder_id,
+                content_type,
+                &blob.hash,
+                blob.size,
+                caller_id,
+            )
             .await?;
         let dto = FileDto::from(file);
         info!(
@@ -352,6 +361,7 @@ impl FileUploadUseCase for FileUploadService {
         blob: StoredBlob,
         content_type: &str,
         modified_at: Option<i64>,
+        caller_id: Uuid,
     ) -> Result<FileDto, DomainError> {
         // Try to find the existing file first
         if let Some(file_read) = &self.file_read
@@ -360,7 +370,13 @@ impl FileUploadUseCase for FileUploadService {
             let file_id = file.id().to_string();
             let (new_hash, updated_at) = self
                 .file_write
-                .update_file_content_with_blob(&file_id, &blob.hash, blob.size, modified_at)
+                .update_file_content_with_blob(
+                    &file_id,
+                    &blob.hash,
+                    blob.size,
+                    modified_at,
+                    caller_id,
+                )
                 .await?;
             // Invalidate content cache — file content has changed.
             if let Some(cc) = &self.content_cache {
@@ -428,6 +444,7 @@ impl FileUploadUseCase for FileUploadService {
                 content_type.to_string(),
                 &blob.hash,
                 blob.size,
+                caller_id,
             )
             .await?;
         let dto = FileDto::from(created);

@@ -711,6 +711,9 @@ pub async fn list_folder_resources(
                             icon_class: Arc::from("fas fa-folder"),
                             icon_special_class: Arc::from("folder-icon"),
                             category: Arc::from("Folder"),
+                            // §14 provenance not selected by the resources query.
+                            created_by: None,
+                            updated_by: None,
                         };
                         FolderResourceItemDto {
                             resource_type: ResourceTypeDto::Folder,
@@ -753,6 +756,9 @@ pub async fn list_folder_resources(
                             sort_date: None,
                             content_hash,
                             etag,
+                            // §14 provenance not selected by the resources query.
+                            created_by: None,
+                            updated_by: None,
                         };
                         FolderResourceItemDto {
                             resource_type: ResourceTypeDto::File,

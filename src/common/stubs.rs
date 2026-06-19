@@ -165,6 +165,7 @@ impl FileWritePort for StubFileWritePort {
         _content_type: String,
         _blob_hash: &str,
         _size: u64,
+        _caller_id: Uuid,
     ) -> Result<File, DomainError> {
         Ok(File::default())
     }
@@ -173,6 +174,7 @@ impl FileWritePort for StubFileWritePort {
         &self,
         _file_id: &str,
         _target_folder_id: Option<String>,
+        _caller_id: Uuid,
     ) -> Result<File, DomainError> {
         Ok(File::default())
     }
@@ -182,11 +184,17 @@ impl FileWritePort for StubFileWritePort {
         _file_id: &str,
         _target_folder_id: Option<String>,
         _new_name: Option<&str>,
+        _caller_id: Uuid,
     ) -> Result<File, DomainError> {
         Ok(File::default())
     }
 
-    async fn rename_file(&self, _file_id: &str, _new_name: &str) -> Result<File, DomainError> {
+    async fn rename_file(
+        &self,
+        _file_id: &str,
+        _new_name: &str,
+        _caller_id: Uuid,
+    ) -> Result<File, DomainError> {
         Ok(File::default())
     }
 
@@ -200,6 +208,7 @@ impl FileWritePort for StubFileWritePort {
         _blob_hash: &str,
         _size: u64,
         _modified_at: Option<i64>,
+        _caller_id: Uuid,
     ) -> Result<(String, i64), DomainError> {
         Ok((String::new(), 0))
     }
@@ -210,11 +219,12 @@ impl FileWritePort for StubFileWritePort {
         _folder_id: Option<String>,
         _content_type: String,
         _size: u64,
+        _caller_id: Uuid,
     ) -> Result<(File, PathBuf), DomainError> {
         Ok((File::default(), PathBuf::from("/tmp/dummy")))
     }
 
-    async fn move_to_trash(&self, _file_id: &str) -> Result<(), DomainError> {
+    async fn move_to_trash(&self, _file_id: &str, _caller_id: Uuid) -> Result<(), DomainError> {
         Ok(())
     }
 
@@ -222,6 +232,7 @@ impl FileWritePort for StubFileWritePort {
         &self,
         _file_id: &str,
         _original_path: &str,
+        _caller_id: Uuid,
     ) -> Result<(), DomainError> {
         Ok(())
     }
@@ -242,6 +253,7 @@ impl FolderRepository for StubFolderStoragePort {
         &self,
         _name: String,
         _parent_id: Option<String>,
+        _caller_id: Uuid,
     ) -> Result<Folder, DomainError> {
         Ok(Folder::default())
     }
@@ -291,7 +303,12 @@ impl FolderRepository for StubFolderStoragePort {
         Ok((Vec::new(), Some(0)))
     }
 
-    async fn rename_folder(&self, _id: &str, _new_name: String) -> Result<Folder, DomainError> {
+    async fn rename_folder(
+        &self,
+        _id: &str,
+        _new_name: String,
+        _caller_id: Uuid,
+    ) -> Result<Folder, DomainError> {
         Ok(Folder::default())
     }
 
@@ -299,6 +316,7 @@ impl FolderRepository for StubFolderStoragePort {
         &self,
         _id: &str,
         _new_parent_id: Option<&str>,
+        _caller_id: Uuid,
     ) -> Result<Folder, DomainError> {
         Ok(Folder::default())
     }
@@ -319,7 +337,7 @@ impl FolderRepository for StubFolderStoragePort {
         Ok(StoragePath::from_string("/"))
     }
 
-    async fn move_to_trash(&self, _folder_id: &str) -> Result<(), DomainError> {
+    async fn move_to_trash(&self, _folder_id: &str, _caller_id: Uuid) -> Result<(), DomainError> {
         Ok(())
     }
 
@@ -327,6 +345,7 @@ impl FolderRepository for StubFolderStoragePort {
         &self,
         _folder_id: &str,
         _original_path: &str,
+        _caller_id: Uuid,
     ) -> Result<(), DomainError> {
         Ok(())
     }
@@ -500,6 +519,7 @@ impl FileUploadUseCase for StubFileUploadUseCase {
         _folder_id: Option<String>,
         _content_type: String,
         _blob: StoredBlob,
+        _caller_id: Uuid,
     ) -> Result<FileDto, DomainError> {
         Ok(FileDto::default())
     }
@@ -511,6 +531,7 @@ impl FileUploadUseCase for StubFileUploadUseCase {
         _blob: StoredBlob,
         _content_type: &str,
         _modified_at: Option<i64>,
+        _caller_id: Uuid,
     ) -> Result<FileDto, DomainError> {
         Ok(FileDto::default())
     }

@@ -162,6 +162,12 @@ impl PathResolverService {
                 icon_class: Arc::from("fas fa-folder"),
                 icon_special_class: Arc::from("folder-icon"),
                 category: Arc::from("Folder"),
+                // §14 provenance not selected by this resolver path —
+                // it's used for existence/type discrimination, not
+                // detailed DTO emission. Callers that need provenance
+                // reload through the repo.
+                created_by: None,
+                updated_by: None,
             })),
             _ => {
                 let mime = mime_type.unwrap_or_else(|| "application/octet-stream".to_string());
@@ -188,6 +194,9 @@ impl PathResolverService {
                     sort_date: None,
                     content_hash: String::new(),
                     etag: String::new(),
+                    // §14 provenance not selected by this resolver path
+                    created_by: None,
+                    updated_by: None,
                 }))
             }
         }

@@ -253,9 +253,10 @@ impl TrashUseCase for TrashService {
                     }
                 };
 
-                // Then physically move the file to trash
+                // Then physically move the file to trash.
+                // §14: caller_id stamps `updated_by` on the trashed row.
                 info!("Physically moving file to trash: {}", item_id);
-                match self.file_write_port.move_to_trash(item_id).await {
+                match self.file_write_port.move_to_trash(item_id, user_id).await {
                     Ok(_) => {
                         debug!("File physically moved to trash successfully: {}", item_id);
                     }
@@ -320,9 +321,10 @@ impl TrashUseCase for TrashService {
                     }
                 };
 
-                // Then physically move the folder to trash
+                // Then physically move the folder to trash.
+                // §14: caller_id stamps `updated_by` on every cascade-trashed row.
                 self.folder_storage_port
-                    .move_to_trash(item_id)
+                    .move_to_trash(item_id, user_id)
                     .await
                     .map_err(|e| {
                         DomainError::new(
@@ -391,7 +393,7 @@ impl TrashUseCase for TrashService {
                         );
                         match self
                             .file_write_port
-                            .restore_from_trash(&file_id, &original_path)
+                            .restore_from_trash(&file_id, &original_path, user_id)
                             .await
                         {
                             Ok(_) => {
@@ -431,7 +433,7 @@ impl TrashUseCase for TrashService {
                         );
                         match self
                             .folder_storage_port
-                            .restore_from_trash(&folder_id, &original_path)
+                            .restore_from_trash(&folder_id, &original_path, user_id)
                             .await
                         {
                             Ok(_) => {
@@ -831,6 +833,9 @@ fn row_to_item_dto(row: TrashResourceRow) -> TrashResourceItemDto {
             icon_class: std::sync::Arc::from("fas fa-folder"),
             icon_special_class: std::sync::Arc::from("folder-icon"),
             category: std::sync::Arc::from("Folder"),
+            // §14 provenance not selected by the trash listing query.
+            created_by: None,
+            updated_by: None,
         };
         TrashResourceItemDto {
             resource_type: ResourceTypeDto::Folder,
@@ -871,6 +876,9 @@ fn row_to_item_dto(row: TrashResourceRow) -> TrashResourceItemDto {
             sort_date: None,
             content_hash,
             etag,
+            // §14 provenance not selected by the trash listing query.
+            created_by: None,
+            updated_by: None,
         };
         TrashResourceItemDto {
             resource_type: ResourceTypeDto::File,

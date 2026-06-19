@@ -13,6 +13,8 @@
 
 # ─────────────────────────────────────────────────────────────
 # Step 1 — Login as admin (Alice), capture token + home folder.
+# `alice_user_id` is captured for the D0 §14 provenance assertions
+# that compare `created_by` / `updated_by` on resources Alice owns.
 # ─────────────────────────────────────────────────────────────
 POST {{base_url}}/api/auth/login
 Content-Type: application/json
@@ -21,6 +23,7 @@ Content-Type: application/json
 HTTP 200
 [Captures]
 alice_token: jsonpath "$.access_token"
+alice_user_id: jsonpath "$.user.id"
 
 GET {{base_url}}/api/folders
 Authorization: Bearer {{alice_token}}
@@ -85,6 +88,10 @@ Content-Type: application/json
 HTTP 201
 [Captures]
 shared_folder_id: jsonpath "$.id"
+[Asserts]
+# D0 §14 provenance — Alice creates, so both fields stamp Alice.
+jsonpath "$.created_by" == "{{alice_user_id}}"
+jsonpath "$.updated_by" == "{{alice_user_id}}"
 
 POST {{base_url}}/api/folders
 Authorization: Bearer {{alice_token}}
@@ -667,6 +674,12 @@ Content-Type: application/json
 { "name": "renamed-by-adam-as-editor" }
 
 HTTP 200
+[Asserts]
+# D0 §14 provenance — folder counterpart of the file rename below.
+# Adam (Editor) mutates Alice's folder; `updated_by` becomes Adam,
+# `created_by` stays Alice.
+jsonpath "$.created_by" == "{{alice_user_id}}"
+jsonpath "$.updated_by" == "{{adam_user_id}}"
 
 PUT {{base_url}}/api/files/{{perm_file_id}}/rename
 Authorization: Bearer {{adam_token}}
@@ -674,6 +687,16 @@ Content-Type: application/json
 { "name": "adam-renamed-logo.jpg" }
 
 HTTP 200
+[Asserts]
+# D0 §14 provenance — Adam (an Editor, not the owner) mutates the
+# file, so `updated_by` switches to Adam's id while `created_by`
+# stays Alice (the original uploader). This is the canonical
+# cross-user provenance check: distinguishes "who first put this
+# here" from "who last touched it" and proves the mutator's id
+# overrides the row's `user_id` (pre-D0 they were silently the
+# same; post-D0 they can diverge once a non-owner mutates).
+jsonpath "$.created_by" == "{{alice_user_id}}"
+jsonpath "$.updated_by" == "{{adam_user_id}}"
 
 # ── Thumbnail push (Update) succeeds ────────────────────────
 PUT {{base_url}}/api/files/{{perm_file_id}}/thumbnail/preview
@@ -690,6 +713,15 @@ Content-Type: application/json
 { "name": "adam-created-child", "parent_id": "{{perm_folder_id}}" }
 
 HTTP 201
+[Asserts]
+# D0 §14 provenance — Adam (Editor on Alice's folder) creates a
+# child folder inside it. Both `created_by` and `updated_by` stamp
+# Adam: he's the original author AND the last toucher of this
+# fresh row. The parent's owner (Alice) doesn't appear anywhere on
+# the new row's provenance — content authored in a shared scope
+# belongs to its author.
+jsonpath "$.created_by" == "{{adam_user_id}}"
+jsonpath "$.updated_by" == "{{adam_user_id}}"
 
 POST {{base_url}}/api/files/upload
 Authorization: Bearer {{adam_token}}
@@ -698,6 +730,10 @@ folder_id: {{perm_folder_id}}
 file: file,fixtures/hello.txt; text/plain
 
 HTTP 201
+[Asserts]
+# Same shape for a file upload: Adam authored, Adam touched last.
+jsonpath "$.created_by" == "{{adam_user_id}}"
+jsonpath "$.updated_by" == "{{adam_user_id}}"
 
 # ── Chunked upload full lifecycle as Editor ─────────────────
 # 1. Open session (server pre-checks Create on folder)

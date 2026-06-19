@@ -284,6 +284,13 @@ pub trait FileWritePort: Send + Sync + 'static {
     ///
     /// Takes ownership of one blob reference: on any failure the reference
     /// is released before the error is returned.
+    ///
+    /// `caller_id` is stamped into both `created_by` and `updated_by`
+    /// (§14 provenance — authorship belongs to the caller, not to the
+    /// parent folder's owner). In D2 shared drives, a non-owner member
+    /// can upload into a folder owned by someone else; the previous
+    /// `created_by = parent.user_id` would have silently recorded the
+    /// wrong principal.
     async fn save_file_with_blob(
         &self,
         name: String,
@@ -291,17 +298,29 @@ pub trait FileWritePort: Send + Sync + 'static {
         content_type: String,
         blob_hash: &str,
         size: u64,
+        caller_id: Uuid,
     ) -> Result<File, DomainError>;
 
-    /// Moves a file to another folder.
+    /// Moves a file to another folder. `caller_id` is stamped into
+    /// `updated_by` alongside the `updated_at = NOW()` bump
+    /// (§14 provenance — authorship belongs to the caller, not to
+    /// the destination folder's owner).
     async fn move_file(
         &self,
         file_id: &str,
         target_folder_id: Option<String>,
+        caller_id: Uuid,
     ) -> Result<File, DomainError>;
 
-    /// Renames a file (same folder, different name).
-    async fn rename_file(&self, file_id: &str, new_name: &str) -> Result<File, DomainError>;
+    /// Renames a file (same folder, different name). `caller_id` is
+    /// stamped into `updated_by` alongside the `updated_at = NOW()`
+    /// bump (§14 provenance).
+    async fn rename_file(
+        &self,
+        file_id: &str,
+        new_name: &str,
+        caller_id: Uuid,
+    ) -> Result<File, DomainError>;
 
     /// Deletes a file.
     async fn delete_file(&self, id: &str) -> Result<(), DomainError>;
@@ -315,24 +334,32 @@ pub trait FileWritePort: Send + Sync + 'static {
     /// Returns `(new_blob_hash, updated_at_epoch)` — everything a caller
     /// needs to rebuild the fresh entity/ETag from a `File` it already
     /// holds, without re-reading the row it just updated.
+    ///
+    /// `caller_id` is stamped into `updated_by` alongside the
+    /// `updated_at` bump (§14 provenance).
     async fn update_file_content_with_blob(
         &self,
         file_id: &str,
         blob_hash: &str,
         size: u64,
         modified_at: Option<i64>,
+        caller_id: Uuid,
     ) -> Result<(String, i64), DomainError>;
 
     /// Registers file metadata WITHOUT writing content to disk (write-behind).
     ///
     /// Returns `(File, PathBuf)` where `PathBuf` is the destination path for the
     /// deferred write that the `WriteBehindCache` will perform.
+    ///
+    /// `caller_id` is stamped into both `created_by` and `updated_by`
+    /// (§14 provenance — see `save_file_with_blob`).
     async fn register_file_deferred(
         &self,
         name: String,
         folder_id: Option<String>,
         content_type: String,
         size: u64,
+        caller_id: Uuid,
     ) -> Result<(File, PathBuf), DomainError>;
 
     /// Copies a file to a (possibly different) folder.
@@ -344,11 +371,16 @@ pub trait FileWritePort: Send + Sync + 'static {
     /// the same folder always collides on the source's filename. WebDAV
     /// COPY uses this for the "same folder, different name" case (the
     /// classic `COPY /a.txt → /b.txt` pattern).
+    ///
+    /// `caller_id` is stamped into both `created_by` and `updated_by`
+    /// on the new row (§14 provenance — the caller authored this copy,
+    /// not the destination folder's owner).
     async fn copy_file(
         &self,
         file_id: &str,
         target_folder_id: Option<String>,
         new_name: Option<&str>,
+        caller_id: Uuid,
     ) -> Result<File, DomainError>;
 
     /// Copies an entire folder subtree atomically using ltree.
@@ -375,14 +407,17 @@ pub trait FileWritePort: Send + Sync + 'static {
 
     // ── Trash operations ──
 
-    /// Moves a file to the trash
-    async fn move_to_trash(&self, file_id: &str) -> Result<(), DomainError>;
+    /// Moves a file to the trash. `caller_id` is stamped into
+    /// `updated_by` (§14 provenance).
+    async fn move_to_trash(&self, file_id: &str, caller_id: Uuid) -> Result<(), DomainError>;
 
-    /// Restores a file from the trash to its original location
+    /// Restores a file from the trash to its original location.
+    /// `caller_id` is stamped into `updated_by` (§14 provenance).
     async fn restore_from_trash(
         &self,
         file_id: &str,
         original_path: &str,
+        caller_id: Uuid,
     ) -> Result<(), DomainError>;
 
     /// Permanently deletes a file (used by the trash)

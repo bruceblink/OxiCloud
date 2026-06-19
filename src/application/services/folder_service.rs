@@ -234,7 +234,7 @@ impl FolderUseCase for FolderService {
 
         let folder = self
             .folder_storage
-            .create_folder(dto.name, dto.parent_id)
+            .create_folder(dto.name, dto.parent_id, caller_id)
             .await?;
         Ok(FolderDto::from(folder))
     }
@@ -489,7 +489,7 @@ impl FolderUseCase for FolderService {
 
         let folder = self
             .folder_storage
-            .rename_folder(id, dto.name)
+            .rename_folder(id, dto.name, caller_id)
             .await
             .map_err(|e| {
                 DomainError::internal_error(
@@ -541,7 +541,7 @@ impl FolderUseCase for FolderService {
         let parent_ref = dto.parent_id.as_deref();
         let folder = self
             .folder_storage
-            .move_folder(id, parent_ref)
+            .move_folder(id, parent_ref, caller_id)
             .await
             .map_err(|e| {
                 DomainError::internal_error(

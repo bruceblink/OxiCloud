@@ -25,6 +25,10 @@ pub struct FileParts {
     pub owner_id: Option<Uuid>,
     /// BLAKE3 content hash. See [`File::content_hash`] for semantics.
     pub blob_hash: String,
+    /// §14 provenance: original creator. See [`File::created_by`].
+    pub created_by: Option<Uuid>,
+    /// §14 provenance: most recent mutator. See [`File::updated_by`].
+    pub updated_by: Option<Uuid>,
 }
 
 /**
@@ -77,6 +81,18 @@ pub struct File {
     /// ETag (the ETag formula may grow to include `modified_at` etc.,
     /// but `content_hash` remains the raw hash).
     blob_hash: String,
+
+    /// User that originally created this file (§14 provenance).
+    /// Stamped at INSERT and never updated thereafter. `None` when
+    /// the referenced user has been deleted (FK is `ON DELETE SET
+    /// NULL`) or for stub/DTO-reconstructed files.
+    created_by: Option<Uuid>,
+
+    /// User that performed the most recent mutation that bumped
+    /// `updated_at` (rename, move, content overwrite, trash, restore).
+    /// Authorship signal — distinct from ownership. `None` when the
+    /// referenced user is deleted or for stub/DTO-reconstructed files.
+    updated_by: Option<Uuid>,
 }
 
 // We no longer need this module, now we use a String directly
@@ -95,6 +111,8 @@ impl Default for File {
             modified_at: 0,
             owner_id: None,
             blob_hash: String::new(),
+            created_by: None,
+            updated_by: None,
         }
     }
 }
@@ -134,6 +152,8 @@ impl File {
             modified_at: now,
             owner_id: None,
             blob_hash: String::new(),
+            created_by: None,
+            updated_by: None,
         })
     }
 
@@ -166,6 +186,8 @@ impl File {
             modified_at,
             owner_id: None,
             blob_hash: String::new(),
+            created_by: None,
+            updated_by: None,
         })
     }
 
@@ -208,6 +230,40 @@ impl File {
         owner_id: Option<Uuid>,
         blob_hash: String,
     ) -> FileResult<Self> {
+        Self::with_timestamps_blob_hash_and_provenance(
+            id,
+            name,
+            storage_path,
+            size,
+            mime_type,
+            folder_id,
+            created_at,
+            modified_at,
+            owner_id,
+            blob_hash,
+            None,
+            None,
+        )
+    }
+
+    /// Full constructor including the §14 provenance columns
+    /// (`created_by` / `updated_by`). PG-row callers use this to
+    /// preserve authorship across reconstruction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_timestamps_blob_hash_and_provenance(
+        id: String,
+        name: String,
+        storage_path: StoragePath,
+        size: u64,
+        mime_type: String,
+        folder_id: Option<String>,
+        created_at: u64,
+        modified_at: u64,
+        owner_id: Option<Uuid>,
+        blob_hash: String,
+        created_by: Option<Uuid>,
+        updated_by: Option<Uuid>,
+    ) -> FileResult<Self> {
         let name = normalize_storage_name(&name);
         if let Err(reason) = validate_storage_name(&name) {
             return Err(FileError::InvalidFileName(format!("{name}: {reason}")));
@@ -228,6 +284,8 @@ impl File {
             modified_at,
             owner_id,
             blob_hash,
+            created_by,
+            updated_by,
         })
     }
 
@@ -248,6 +306,8 @@ impl File {
             modified_at: self.modified_at,
             owner_id: self.owner_id,
             blob_hash: self.blob_hash,
+            created_by: self.created_by,
+            updated_by: self.updated_by,
         }
     }
 
@@ -351,6 +411,21 @@ impl File {
         self.owner_id
     }
 
+    /// User that originally created this file (§14 provenance).
+    /// `None` when the referenced user has been deleted
+    /// (FK is `ON DELETE SET NULL`) or for stub/DTO entities.
+    pub fn created_by(&self) -> Option<Uuid> {
+        self.created_by
+    }
+
+    /// User that performed the most recent mutation that bumped
+    /// `updated_at`. Authorship signal — distinct from ownership.
+    /// `None` when the referenced user is deleted or for
+    /// stub/DTO entities.
+    pub fn updated_by(&self) -> Option<Uuid> {
+        self.updated_by
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn from_dto(
         id: String,
@@ -382,6 +457,10 @@ impl File {
             modified_at,
             owner_id: None,
             blob_hash: String::new(),
+            // DTO round-trips don't carry provenance; callers needing
+            // it must reload from the repository.
+            created_by: None,
+            updated_by: None,
         }
     }
 

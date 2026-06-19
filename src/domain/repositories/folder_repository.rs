@@ -18,11 +18,18 @@ use uuid::Uuid;
 /// Defines the CRUD and management operations required for
 /// the Folder entity in the storage system.
 pub trait FolderRepository: Send + Sync + 'static {
-    /// Creates a new folder
+    /// Creates a new folder.
+    ///
+    /// `caller_id` is stamped into `created_by` and `updated_by`
+    /// (D0 §14 provenance — authorship belongs to whoever issued the
+    /// create, not to the parent folder's owner). Pre-D2 they're
+    /// silently equivalent (only the owner can write); D2 ships
+    /// shared drives where this distinction matters.
     async fn create_folder(
         &self,
         name: String,
         parent_id: Option<String>,
+        caller_id: Uuid,
     ) -> Result<Folder, DomainError>;
 
     /// Gets a folder by its ID
@@ -74,14 +81,23 @@ pub trait FolderRepository: Send + Sync + 'static {
         include_total: bool,
     ) -> Result<(Vec<Folder>, Option<usize>), DomainError>;
 
-    /// Renames a folder
-    async fn rename_folder(&self, id: &str, new_name: String) -> Result<Folder, DomainError>;
+    /// Renames a folder. `caller_id` is stamped into `updated_by`
+    /// alongside the `updated_at = NOW()` bump (§14 provenance).
+    async fn rename_folder(
+        &self,
+        id: &str,
+        new_name: String,
+        caller_id: Uuid,
+    ) -> Result<Folder, DomainError>;
 
-    /// Moves a folder to another parent
+    /// Moves a folder to another parent. `caller_id` is stamped into
+    /// `updated_by` alongside the `updated_at = NOW()` bump
+    /// (§14 provenance).
     async fn move_folder(
         &self,
         id: &str,
         new_parent_id: Option<&str>,
+        caller_id: Uuid,
     ) -> Result<Folder, DomainError>;
 
     /// Deletes a folder
@@ -102,14 +118,19 @@ pub trait FolderRepository: Send + Sync + 'static {
 
     // ── Trash operations ──
 
-    /// Moves a folder to the trash
-    async fn move_to_trash(&self, folder_id: &str) -> Result<(), DomainError>;
+    /// Moves a folder to the trash. `caller_id` is stamped into
+    /// `updated_by` for the root row and every cascade-trashed
+    /// descendant (§14 provenance).
+    async fn move_to_trash(&self, folder_id: &str, caller_id: Uuid) -> Result<(), DomainError>;
 
-    /// Restores a folder from the trash to its original location
+    /// Restores a folder from the trash to its original location.
+    /// `caller_id` is stamped into `updated_by` for the root row and
+    /// every cascade-restored descendant (§14 provenance).
     async fn restore_from_trash(
         &self,
         folder_id: &str,
         original_path: &str,
+        caller_id: Uuid,
     ) -> Result<(), DomainError>;
 
     /// Permanently deletes a folder (used by the trash)

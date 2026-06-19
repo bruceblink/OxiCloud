@@ -906,6 +906,7 @@ mod tests {
             &self,
             _name: String,
             _parent_id: Option<String>,
+            _caller_id: uuid::Uuid,
         ) -> Result<crate::domain::entities::folder::Folder, DomainError> {
             unimplemented!()
         }
@@ -980,6 +981,7 @@ mod tests {
             &self,
             _id: &str,
             _new_name: String,
+            _caller_id: Uuid,
         ) -> Result<crate::domain::entities::folder::Folder, DomainError> {
             unimplemented!()
         }
@@ -988,6 +990,7 @@ mod tests {
             &self,
             _id: &str,
             _new_parent_id: Option<&str>,
+            _caller_id: Uuid,
         ) -> Result<crate::domain::entities::folder::Folder, DomainError> {
             unimplemented!()
         }
@@ -1011,7 +1014,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn move_to_trash(&self, _folder_id: &str) -> Result<(), DomainError> {
+        async fn move_to_trash(
+            &self,
+            _folder_id: &str,
+            _caller_id: Uuid,
+        ) -> Result<(), DomainError> {
             unimplemented!()
         }
 
@@ -1019,6 +1026,7 @@ mod tests {
             &self,
             _folder_id: &str,
             _original_path: &str,
+            _caller_id: Uuid,
         ) -> Result<(), DomainError> {
             unimplemented!()
         }

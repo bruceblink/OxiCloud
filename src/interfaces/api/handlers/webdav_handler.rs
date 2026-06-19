@@ -438,6 +438,9 @@ async fn handle_propfind(
             icon_class: Arc::from("fas fa-folder"),
             icon_special_class: Arc::from("folder-icon"),
             category: Arc::from("Folder"),
+            // §14 provenance not applicable to the synthetic root.
+            created_by: None,
+            updated_by: None,
         };
 
         return build_streaming_propfind_response(
@@ -1197,7 +1200,14 @@ async fn handle_put(
     let content_type = ingested.content_type.clone();
     let drive_id = resolve_drive_id_for_native_webdav(&state, user.id).await?;
     let result = file_upload_service
-        .update_file_streaming(&path, drive_id, ingested.stored(), &content_type, None)
+        .update_file_streaming(
+            &path,
+            drive_id,
+            ingested.stored(),
+            &content_type,
+            None,
+            user.id,
+        )
         .await;
 
     match result {

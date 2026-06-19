@@ -86,6 +86,19 @@ pub struct FolderDto {
     /// pass it back through `If-Match` on rename / move endpoints
     /// without a separate HEAD round-trip.
     pub etag: String,
+
+    /// §14 provenance: user that originally created this folder.
+    /// `None` when the referenced user has been deleted (FK is
+    /// `ON DELETE SET NULL`) or for stub/legacy folders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<Uuid>,
+
+    /// §14 provenance: user that performed the most recent mutation
+    /// that bumped `updated_at`. Authorship signal — distinct from
+    /// `owner_id`. `None` when the referenced user is deleted or for
+    /// stub/legacy folders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<Uuid>,
 }
 
 impl From<Folder> for FolderDto {
@@ -107,6 +120,8 @@ impl From<Folder> for FolderDto {
             icon_special_class: Arc::from("folder-icon"),
             category: Arc::from("Folder"),
             etag,
+            created_by: folder.created_by(),
+            updated_by: folder.updated_by(),
         }
     }
 }
@@ -159,6 +174,8 @@ impl FolderDto {
             icon_special_class: Arc::from("folder-icon"),
             category: Arc::from("Folder"),
             etag: String::new(),
+            created_by: None,
+            updated_by: None,
         }
     }
 }

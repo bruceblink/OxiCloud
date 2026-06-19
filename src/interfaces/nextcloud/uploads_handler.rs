@@ -298,6 +298,7 @@ async fn handle_assemble(
                 ingested.stored(),
                 &content_type,
                 oc_mtime,
+                user.id,
             )
             .await
             .map_err(|e| AppError::internal_error(format!("Failed to update file: {}", e)))?;
@@ -334,6 +335,7 @@ async fn handle_assemble(
                 Some(parent_folder.id),
                 content_type.to_string(),
                 ingested.stored(),
+                user.id,
             )
             .await
             .map_err(|e| AppError::internal_error(format!("Failed to create file: {}", e)))?;

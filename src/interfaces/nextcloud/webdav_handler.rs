@@ -754,6 +754,7 @@ async fn handle_put(
             ingested.stored(),
             &content_type,
             oc_mtime,
+            session.user.id,
         )
         .await
         .map_err(|e| AppError::internal_error(format!("Failed to store file: {}", e)))?;
@@ -1667,6 +1668,9 @@ mod tests {
             icon_special_class: std::sync::Arc::from("folder-icon"),
             category: std::sync::Arc::from("Folder"),
             etag: String::new(),
+            // §14 provenance not relevant to path-mapper tests.
+            created_by: None,
+            updated_by: None,
         }
     }
 

@@ -344,6 +344,9 @@ fn file_dto_from_search(fr: &crate::application::dtos::search_dto::SearchFileRes
         sort_date: None,
         content_hash: fr.blob_hash.clone(),
         etag,
+        // §14 provenance not selected by the search result DTO.
+        created_by: None,
+        updated_by: None,
     }
 }
 
@@ -368,6 +371,9 @@ fn folder_dto_from_search(
         icon_class: Arc::from("fas fa-folder"),
         icon_special_class: Arc::from("folder-icon"),
         category: Arc::from("Folder"),
+        // §14 provenance not selected by search results.
+        created_by: None,
+        updated_by: None,
     }
 }
 

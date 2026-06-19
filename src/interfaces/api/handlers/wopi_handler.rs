@@ -258,7 +258,14 @@ async fn put_file(
         .app_state
         .applications
         .file_upload_service
-        .update_file_streaming(&file.path, drive_id, ingested.stored(), &content_type, None)
+        .update_file_streaming(
+            &file.path,
+            drive_id,
+            ingested.stored(),
+            &content_type,
+            None,
+            claims_sub_uuid,
+        )
         .await;
 
     match result {
