@@ -814,15 +814,16 @@ impl AppServiceFactory {
         service
     }
 
-    /// Creates the face-indexing lifecycle hook (People feature). Uses the
-    /// default no-op analyzer until the operator wires a real ONNX model.
+    /// Creates the face-indexing lifecycle hook (People feature). Picks the
+    /// real ONNX analyzer when the `faces-onnx` feature is compiled in and the
+    /// operator has configured the runtime + models; otherwise the inert no-op
+    /// analyzer (see [`Self::build_face_analyzer`]).
     pub fn create_face_indexing_service(
         &self,
         db_pool: &Arc<PgPool>,
     ) -> Arc<crate::infrastructure::services::face_indexing_service::FaceIndexingService> {
         let blob_root = self.storage_path.join(".blobs");
-        let analyzer: Arc<dyn crate::application::ports::face_ports::FaceAnalyzerPort> =
-            Arc::new(crate::infrastructure::services::noop_face_analyzer::NoopFaceAnalyzer);
+        let analyzer = self.build_face_analyzer();
         Arc::new(
             crate::infrastructure::services::face_indexing_service::FaceIndexingService::new(
                 db_pool.clone(),
@@ -830,6 +831,55 @@ impl AppServiceFactory {
                 analyzer,
             ),
         )
+    }
+
+    /// Selects the face analyzer. With the `faces-onnx` feature and a fully
+    /// configured runtime + models, loads the real ONNX analyzer; any missing
+    /// piece or load failure degrades gracefully to the no-op analyzer (logged)
+    /// so startup never fails on biometric configuration.
+    fn build_face_analyzer(
+        &self,
+    ) -> Arc<dyn crate::application::ports::face_ports::FaceAnalyzerPort> {
+        #[cfg(feature = "faces-onnx")]
+        {
+            let f = &self.config.faces;
+            if let (Some(dylib), Some(detector), Some(embedder)) = (
+                f.ort_dylib.as_ref(),
+                f.detector_model.as_ref(),
+                f.embedder_model.as_ref(),
+            ) {
+                use crate::infrastructure::services::onnx_face_analyzer::{
+                    OnnxFaceAnalyzer, OnnxLoadConfig,
+                };
+                let cfg = OnnxLoadConfig {
+                    dylib,
+                    detector,
+                    embedder,
+                    det_size: f.det_size,
+                    det_threshold: f.det_threshold,
+                    nms_threshold: f.nms_threshold,
+                    intra_threads: f.intra_threads,
+                };
+                match OnnxFaceAnalyzer::load(&cfg) {
+                    Ok(analyzer) => {
+                        tracing::info!("Face analyzer: ONNX models loaded");
+                        return Arc::new(analyzer);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Face analyzer: failed to load ONNX models ({e}); \
+                             falling back to no-op analyzer"
+                        );
+                    }
+                }
+            } else {
+                tracing::info!(
+                    "Face analyzer: faces-onnx compiled but runtime/models not fully \
+                     configured; using no-op analyzer"
+                );
+            }
+        }
+        Arc::new(crate::infrastructure::services::noop_face_analyzer::NoopFaceAnalyzer)
     }
 
     /// Creates the People (faces) read/clustering service.

@@ -81,6 +81,8 @@ nom-exif = "3.6.1"
 extism = { version = "1.30.0", optional = true }
 toml = { version = "1.1.2", optional = true }
 file-rotate = { version = "0.7.6", optional = true }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic", "ndarray", "tracing", "api-24"], optional = true }
+ndarray = { version = "0.17.2", optional = true }
 
 [features]
 default = []
@@ -95,6 +97,12 @@ plugins = ["dep:extism", "dep:toml", "dep:file-rotate"]
 # this lets one `cargo build` produce both `oxicloud` and `load-seed`
 # without recompiling oxicloud with mockall in scope.
 load_seed_bin = []
+# Real ONNX-backed face analyzer (detector + embedder) for the People feature.
+# Opt-in: pulls `ort` (ONNX Runtime, load-dynamic — dlopen's libonnxruntime at
+# runtime) + `ndarray`, a heavy stack most deployments won't use. Activation also
+# requires OXICLOUD_ENABLE_FACES=true *and* operator-provided ONNX models; without
+# this feature the People pipeline falls back to the inert NoopFaceAnalyzer.
+faces-onnx = ["dep:ort", "dep:ndarray"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(integration_tests)'] }

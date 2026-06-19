@@ -905,6 +905,53 @@ impl Default for FeaturesConfig {
     }
 }
 
+/// Face-recognition (People) model configuration.
+///
+/// Only consulted when the `faces-onnx` cargo feature is compiled in *and*
+/// [`FeaturesConfig::enable_faces`] is true; otherwise the inert
+/// `NoopFaceAnalyzer` is used regardless of these values. The ONNX Runtime
+/// dylib and both model files are operator-provided at runtime (never
+/// committed) — when any is unset or fails to load, the People pipeline
+/// silently falls back to the no-op analyzer and the server still boots.
+#[derive(Debug, Clone)]
+pub struct FacesConfig {
+    /// `libonnxruntime.{so,dylib,dll}`. Falls back to the `ORT_DYLIB_PATH`
+    /// environment variable when unset. Env: `OXICLOUD_FACES_ORT_DYLIB`.
+    pub ort_dylib: Option<PathBuf>,
+    /// SCRFD/RetinaFace detector model with 5-point landmarks.
+    /// Env: `OXICLOUD_FACES_DETECTOR_MODEL`.
+    pub detector_model: Option<PathBuf>,
+    /// ArcFace embedder model (112×112 → 512-d).
+    /// Env: `OXICLOUD_FACES_EMBEDDER_MODEL`.
+    pub embedder_model: Option<PathBuf>,
+    /// Detector square input size in pixels (default 640).
+    /// Env: `OXICLOUD_FACES_DET_SIZE`.
+    pub det_size: u32,
+    /// Minimum detector confidence to keep a face (default 0.5).
+    /// Env: `OXICLOUD_FACES_DET_THRESHOLD`.
+    pub det_threshold: f32,
+    /// IoU threshold for non-max suppression (default 0.4).
+    /// Env: `OXICLOUD_FACES_NMS_THRESHOLD`.
+    pub nms_threshold: f32,
+    /// ONNX Runtime intra-op threads (0 = let ORT decide).
+    /// Env: `OXICLOUD_FACES_INTRA_THREADS`.
+    pub intra_threads: usize,
+}
+
+impl Default for FacesConfig {
+    fn default() -> Self {
+        Self {
+            ort_dylib: None,
+            detector_model: None,
+            embedder_model: None,
+            det_size: 640,
+            det_threshold: 0.5,
+            nms_threshold: 0.4,
+            intra_threads: 0,
+        }
+    }
+}
+
 /// Content-search configuration (embedded Tantivy index over file names and
 /// extracted file content).
 ///
@@ -1070,6 +1117,8 @@ pub struct AppConfig {
     pub content_search: ContentSearchConfig,
     /// WASM plugin runtime configuration
     pub plugins: PluginConfig,
+    /// Face-recognition (People) model configuration
+    pub faces: FacesConfig,
 }
 
 /// Server-side i18n knobs.
@@ -1123,6 +1172,7 @@ impl Default for AppConfig {
             i18n: I18nConfig::default(),
             content_search: ContentSearchConfig::default(),
             plugins: PluginConfig::default(),
+            faces: FacesConfig::default(),
         }
     }
 }
@@ -1395,6 +1445,43 @@ impl AppConfig {
             && let Ok(val) = enable_faces
         {
             config.features.enable_faces = val;
+        }
+
+        // Faces (People) ONNX runtime + models — operator-provided at runtime.
+        if let Ok(v) = env::var("OXICLOUD_FACES_ORT_DYLIB").or_else(|_| env::var("ORT_DYLIB_PATH"))
+            && !v.is_empty()
+        {
+            config.faces.ort_dylib = Some(PathBuf::from(v));
+        }
+        if let Ok(v) = env::var("OXICLOUD_FACES_DETECTOR_MODEL")
+            && !v.is_empty()
+        {
+            config.faces.detector_model = Some(PathBuf::from(v));
+        }
+        if let Ok(v) = env::var("OXICLOUD_FACES_EMBEDDER_MODEL")
+            && !v.is_empty()
+        {
+            config.faces.embedder_model = Some(PathBuf::from(v));
+        }
+        if let Ok(v) = env::var("OXICLOUD_FACES_DET_SIZE").map(|v| v.parse::<u32>())
+            && let Ok(val) = v
+        {
+            config.faces.det_size = val;
+        }
+        if let Ok(v) = env::var("OXICLOUD_FACES_DET_THRESHOLD").map(|v| v.parse::<f32>())
+            && let Ok(val) = v
+        {
+            config.faces.det_threshold = val;
+        }
+        if let Ok(v) = env::var("OXICLOUD_FACES_NMS_THRESHOLD").map(|v| v.parse::<f32>())
+            && let Ok(val) = v
+        {
+            config.faces.nms_threshold = val;
+        }
+        if let Ok(v) = env::var("OXICLOUD_FACES_INTRA_THREADS").map(|v| v.parse::<usize>())
+            && let Ok(val) = v
+        {
+            config.faces.intra_threads = val;
         }
 
         // Content search (embedded Tantivy index)
