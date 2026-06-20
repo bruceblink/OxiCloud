@@ -54,6 +54,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import SkeletonList from '$lib/components/SkeletonList.svelte';
 	import ListToolbar from '$lib/components/ListToolbar.svelte';
+	import UserVignette from '$lib/components/UserVignette.svelte';
 	import VirtualList from '$lib/components/VirtualList.svelte';
 	import { t } from '$lib/i18n/index.svelte';
 	import { files as filesStore } from '$lib/stores/files.svelte';
@@ -329,12 +330,11 @@
 		</div>
 		{#if showOwner}
 			<div class="owner-cell">
-				<span class="rl-vignette">
-					<span class="rl-vignette__avatar" aria-hidden="true"
-						>{(entry.ownerName ?? '?').slice(0, 1).toUpperCase()}</span
-					>
-					<span class="rl-vignette__name">{entry.ownerName ?? entry.ownerId ?? ''}</span>
-				</span>
+				{#if entry.ownerId}
+					<UserVignette userId={entry.ownerId} fallbackLabel={entry.ownerName ?? undefined} />
+				{:else}
+					<span class="owner-cell__placeholder">{entry.ownerName ?? '—'}</span>
+				{/if}
 			</div>
 		{/if}
 		{#if showPath}<div class="path-cell">{entry.path ?? ''}</div>{/if}
@@ -570,28 +570,7 @@
 		min-width: 0;
 	}
 
-	.rl-vignette {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2);
-		min-width: 0;
-	}
-
-	.rl-vignette__avatar {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		border-radius: 50%;
-		background: var(--color-accent-bg-sm);
-		color: var(--color-accent-text);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-semibold);
-		flex: none;
-	}
-
-	.rl-vignette__name {
+	.owner-cell__placeholder {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;

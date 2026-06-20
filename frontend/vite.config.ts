@@ -15,7 +15,8 @@ const proxy = {
 	'/webdav': { target: BACKEND, changeOrigin: true },
 	'/caldav': { target: BACKEND, changeOrigin: true },
 	'/carddav': { target: BACKEND, changeOrigin: true },
-	'/wopi': { target: BACKEND, changeOrigin: true }
+	'/wopi': { target: BACKEND, changeOrigin: true },
+	'/magic': { target: BACKEND, changeOrigin: true }
 };
 
 export default defineConfig({

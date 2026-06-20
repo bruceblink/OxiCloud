@@ -61,7 +61,7 @@
 	);
 
 	const groupBys: GroupByDef[] = [
-		{ key: '', label: t('files.name', 'Name'), orderBy: 'name' },
+		{ key: '', label: t('files.name', 'Name'), orderBy: 'name', icon: 'arrow-up-a-z' },
 		{
 			key: 'owner',
 			label: t('groupby.owner', 'Owner'),

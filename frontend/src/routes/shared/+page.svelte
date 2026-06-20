@@ -22,6 +22,7 @@
 	import Icon from '$lib/icons/Icon.svelte';
 	import ListToolbar from '$lib/components/ListToolbar.svelte';
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
+	import UserVignette from '$lib/components/UserVignette.svelte';
 	import { t } from '$lib/i18n/index.svelte';
 	import { ui } from '$lib/stores/ui.svelte';
 	import { iconNameFromClass } from '$lib/utils/display';
@@ -388,16 +389,21 @@
 							<Icon name="pencil-alt" />
 							{t('myshares.editSharing', 'Edit sharing')}
 						</button>
+					{:else if lane.header.kind === 'user'}
+						<span class="ms-lane__subject">
+							<UserVignette
+								userId={lane.header.id}
+								fallbackLabel={resolveLabel('user', lane.header.id)}
+							/>
+						</span>
 					{:else}
 						<span class="ms-lane__subject">
 							<Icon
-								name={lane.header.kind === 'user'
-									? 'user'
-									: lane.header.kind === 'group'
-										? 'user-group'
-										: lane.header.kind === 'linkPassword'
-											? 'lock'
-											: 'link'}
+								name={lane.header.kind === 'group'
+									? 'user-group'
+									: lane.header.kind === 'linkPassword'
+										? 'lock'
+										: 'link'}
 							/>
 							<span class="ms-lane__name">{laneTitle(lane.header)}</span>
 						</span>
@@ -416,8 +422,10 @@
 										<span class="ms-row__name">{item.resource.name}</span>
 									</button>
 								{:else if grant.subject_type === 'user'}
-									<Icon name="user" />
-									<span class="ms-row__name">{resolveLabel('user', grant.subject_id)}</span>
+									<UserVignette
+										userId={grant.subject_id}
+										fallbackLabel={resolveLabel('user', grant.subject_id)}
+									/>
 								{:else if grant.subject_type === 'group'}
 									<Icon name="user-group" />
 									<span class="ms-row__name">{resolveLabel('group', grant.subject_id)}</span>
