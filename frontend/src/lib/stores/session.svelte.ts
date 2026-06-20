@@ -41,6 +41,22 @@ class SessionStore {
 	}
 
 	/**
+	 * Re-fetch the authenticated user from the server, bypassing the one-shot
+	 * `load()` cache. Call after operations that change server-side user state —
+	 * chiefly storage usage after uploads / deletes — so the UI reflects the new
+	 * `storage_used_bytes` instead of the value cached at login. A transient
+	 * failure leaves the current user untouched (never logs the UI out).
+	 */
+	async refresh(): Promise<void> {
+		try {
+			const me = await fetchMe();
+			if (me) this.user = me;
+		} catch {
+			/* keep the existing user on a transient /api/auth/me failure */
+		}
+	}
+
+	/**
 	 * Resolve the caller's default personal drive's root folder — the landing
 	 * point for `/files` and the `/` redirect. Externals (grant-only) have no
 	 * personal drive, so this is skipped for them.

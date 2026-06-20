@@ -4,6 +4,46 @@ import { getCsrfHeaders } from '$lib/api/csrf';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
+/**
+ * Instant upload: materialise a file from a blob the caller **already owns**,
+ * by its whole-file BLAKE3 — zero content bytes cross the wire. Returns the HTTP
+ * status so the caller can fall back to a plain upload on 404 (hash not owned).
+ * Scoped to the caller's own content server-side (no cross-user probing).
+ */
+export async function createFileByHash(
+	folderId: string,
+	name: string,
+	hash: string
+): Promise<{ ok: boolean; status: number; data?: unknown }> {
+	const res = await apiFetch('/api/files/by-hash', {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { ...JSON_HEADERS, ...getCsrfHeaders() },
+		body: JSON.stringify({ name, folder_id: folderId, hash })
+	});
+	const data = res.ok ? await res.json().catch(() => undefined) : undefined;
+	return { ok: res.ok, status: res.status, data };
+}
+
+/**
+ * Batch dedup check: given candidate whole-file BLAKE3 hashes, return the set
+ * the caller **already owns** — in a single round trip. Drives instant uploads:
+ * a file whose hash is in the set can be created with zero content bytes.
+ * Resolves an empty set on any failure, so the caller just uploads everything.
+ */
+export async function dedupCheckBatch(hashes: string[]): Promise<Set<string>> {
+	if (hashes.length === 0) return new Set();
+	const res = await apiFetch('/api/dedup/check-batch', {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { ...JSON_HEADERS, ...getCsrfHeaders() },
+		body: JSON.stringify({ hashes })
+	});
+	if (!res.ok) return new Set();
+	const data = (await res.json().catch(() => null)) as { owned?: string[] } | null;
+	return new Set(data?.owned ?? []);
+}
+
 export async function uploadFile(folderId: string | null, file: File): Promise<void> {
 	const form = new FormData();
 	if (folderId) form.append('folder_id', folderId);

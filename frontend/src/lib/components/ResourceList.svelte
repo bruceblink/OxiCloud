@@ -59,7 +59,7 @@
 	import { t } from '$lib/i18n/index.svelte';
 	import { files as filesStore } from '$lib/stores/files.svelte';
 	import { formatBytes } from '$lib/utils/format';
-	import { formatDate, iconNameFromClass } from '$lib/utils/display';
+	import { formatDate, iconNameFromClass, fileIconKindClass } from '$lib/utils/display';
 	import { gridColumns } from '$lib/utils/grid';
 
 	interface Props {
@@ -301,6 +301,7 @@
 </script>
 
 {#snippet row(entry: ResourceEntry)}
+	{@const iconName = entry.kind === 'folder' ? 'folder' : iconNameFromClass(entry.iconClass)}
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div
 		class="file-item"
@@ -323,8 +324,8 @@
 			</div>
 		{/if}
 		<div class="name-cell">
-			<span class="file-icon">
-				<Icon name={entry.kind === 'folder' ? 'folder' : iconNameFromClass(entry.iconClass)} />
+			<span class="file-icon {fileIconKindClass(iconName)}">
+				<Icon name={iconName} />
 			</span>
 			<span class="name-cell__text">{entry.name}</span>
 		</div>

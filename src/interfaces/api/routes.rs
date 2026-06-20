@@ -391,10 +391,11 @@ pub fn create_api_routes(app_state: &Arc<AppState>) -> Router<Arc<AppState>> {
     // All handlers are free functions — see dedup_handler.rs for why
     // #[utoipa::path] cannot be applied to DedupHandler impl methods directly.
     use super::handlers::dedup_handler::{
-        check_hash, get_blob, get_stats, recalculate_stats, upload_with_dedup,
+        check_hash, check_hashes_batch, get_blob, get_stats, recalculate_stats, upload_with_dedup,
     };
     let dedup_router = Router::new()
         .route("/check/{hash}", get(check_hash))
+        .route("/check-batch", post(check_hashes_batch))
         .route("/upload", post(upload_with_dedup))
         .route("/stats", get(get_stats))
         .route("/blob/{hash}", get(get_blob))

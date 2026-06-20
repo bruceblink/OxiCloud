@@ -22,6 +22,17 @@ const VIRTUAL_NAME_KEYS: Record<string, string> = {
 	[INTERNAL_GROUP_ID]: 'groups.virtual_internal_name'
 };
 
+/**
+ * Map of well-known virtual-group UUIDs → i18n key for a human-readable
+ * description. Virtual groups are server-seeded and their `description` column
+ * holds developer/schema notes (e.g. the Internal group's "…no rows in
+ * subject_group_members."), which must never reach end users — so virtual
+ * groups display a localized blurb instead of their raw `description`.
+ */
+const VIRTUAL_DESC_KEYS: Record<string, string> = {
+	[INTERNAL_GROUP_ID]: 'groups.virtual_internal_explanation'
+};
+
 export interface GroupItem {
 	id: string;
 	name: string;
@@ -85,6 +96,20 @@ export function groupDisplayName(group: GroupItem): string {
 		if (key) return t(key, group.name);
 	}
 	return group.name;
+}
+
+/**
+ * Human-readable description for a group row. Virtual groups render a localized
+ * blurb (via the well-known UUID mapping) so their internal DB schema notes
+ * never leak to the UI; a virtual group without a mapped key shows nothing.
+ * User-defined groups display their raw `description` verbatim.
+ */
+export function groupDescription(group: GroupItem): string | null {
+	if (group.is_virtual) {
+		const key = VIRTUAL_DESC_KEYS[group.id];
+		return key ? t(key, group.name) : null;
+	}
+	return group.description ?? null;
 }
 
 /**

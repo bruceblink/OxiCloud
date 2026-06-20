@@ -43,6 +43,69 @@
     pointer-events: none;
 }
 
+/* ── File-type colours ───────────────────────────────────────
+   Each bucket sets a local --fk (the foreground hue, from the
+   --file-kind-* tokens). The glyph takes --fk directly and the tile
+   fill/ring derive soft tints from it with color-mix(), so the icons read
+   as colourful tiles instead of flat monochrome. Adding a bucket is a
+   single custom-property line; the consuming rules never change. */
+.file-icon {
+    --fk: var(--file-kind-generic);
+}
+
+.file-icon--folder {
+    --fk: var(--file-kind-folder);
+}
+
+.file-icon--pdf {
+    --fk: var(--file-kind-pdf);
+}
+
+.file-icon--doc {
+    --fk: var(--file-kind-doc);
+}
+
+.file-icon--sheet {
+    --fk: var(--file-kind-sheet);
+}
+
+.file-icon--slides {
+    --fk: var(--file-kind-slides);
+}
+
+.file-icon--archive {
+    --fk: var(--file-kind-archive);
+}
+
+.file-icon--code {
+    --fk: var(--file-kind-code);
+}
+
+.file-icon--image {
+    --fk: var(--file-kind-image);
+}
+
+.file-icon--video {
+    --fk: var(--file-kind-video);
+}
+
+.file-icon--audio {
+    --fk: var(--file-kind-audio);
+}
+
+.file-icon--text {
+    --fk: var(--file-kind-text);
+}
+
+.file-icon--generic {
+    --fk: var(--file-kind-generic);
+}
+
+.file-icon > i,
+.file-icon > svg {
+    color: var(--fk);
+}
+
 /* ── Item states ─────────────────────────────────────────── */
 
 .file-item {
@@ -355,9 +418,10 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-lg);
-    /* Hairline inner ring — consistent with the grid thumbnails so light
-       previews don't bleed into the row. */
-    box-shadow: inset 0 0 0 1px var(--color-border);
+    /* Soft type-tinted tile + matching hairline ring so the row glyph reads as
+       a colourful chip (and light previews don't bleed into the row). */
+    background: color-mix(in srgb, var(--fk) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fk) 22%, var(--color-border));
     font-size: var(--text-md);
     margin-bottom: 0;
     flex-shrink: 0;
@@ -859,9 +923,11 @@
     height: auto;
     aspect-ratio: 4 / 3;
     border-radius: var(--radius-lg);
-    background: var(--color-bg-input);
-    /* Hairline inner ring so light thumbnails don't bleed into the card. */
-    box-shadow: inset 0 0 0 1px var(--color-border);
+    /* Soft type-tinted fill + matching hairline ring (a thumbnail, when
+       present, covers both edge-to-edge). Gives non-preview files a modern
+       colourful tile keyed to their type instead of a flat grey panel. */
+    background: color-mix(in srgb, var(--fk) 9%, var(--color-bg-input));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fk) 22%, var(--color-border));
     margin: 0 0 var(--space-3);
     font-size: 30px;
 }

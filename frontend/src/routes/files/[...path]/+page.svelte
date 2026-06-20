@@ -26,11 +26,14 @@
 		fileThumbnailUrl,
 		moveFile,
 		renameFile,
-		uploadFile,
 		uploadFileWithProgress
 	} from '$lib/api/endpoints/files';
 	import { folderZipUrl } from '$lib/api/endpoints/folders';
-	import { tryDeltaUpload } from '$lib/api/endpoints/deltaUpload';
+	import {
+		instantUploadOwned,
+		resolveOwnedHashes,
+		tryDeltaUpload
+	} from '$lib/api/endpoints/deltaUpload';
 	import { addFavorite, removeFavorite } from '$lib/api/endpoints/favorites';
 	import { canEditWithWopi, getEditorUrlWithFallback } from '$lib/api/endpoints/wopi';
 	import { addTracks, createPlaylist, listPlaylists } from '$lib/api/endpoints/music';
@@ -56,7 +59,7 @@
 		typeLabel
 	} from '$lib/stores/files.svelte';
 	import { formatBytes } from '$lib/utils/format';
-	import { formatDate, iconNameFromClass } from '$lib/utils/display';
+	import { formatDate, iconNameFromClass, fileIconKindClass } from '$lib/utils/display';
 	import { gridColumns } from '$lib/utils/grid';
 
 	// File preview and the WOPI editor are heavy and only appear on demand, so
@@ -287,6 +290,39 @@
 	}
 
 	/**
+	 * Upload one file through the best available path, returning the bytes saved
+	 * by deduplication (0 when the body was sent in full). Order:
+	 *   1. Instant by-hash upload — zero bytes when `ownedHash` is set (the batch
+	 *      check found the server already has this exact blob).
+	 *   2. Delta upload — sub-file CDC dedup for large files (>= 8 MB).
+	 *   3. Plain byte upload — fallback when neither applies.
+	 * Throws on a hard failure (e.g. quota).
+	 */
+	async function uploadOneFile(
+		folderId: string | null,
+		file: File,
+		report: (frac: number) => void,
+		ownedHash: string | null
+	): Promise<number> {
+		const dedup =
+			(ownedHash && folderId ? await instantUploadOwned(folderId, file, ownedHash) : null) ??
+			(await tryDeltaUpload(file, folderId, (pct) => report(pct / 100)));
+		if (dedup) {
+			if (!dedup.ok) throw new Error(dedup.errorMsg ?? 'upload failed');
+			return dedup.savedBytes ?? 0;
+		}
+		await uploadFileWithProgress(folderId, file, report);
+		return 0;
+	}
+
+	/** Final bell message for a finished upload, noting deduplicated bytes. */
+	function uploadDoneMessage(savedBytes: number): string {
+		if (savedBytes <= 0) return t('files.uploaded', 'Upload complete');
+		const mb = (savedBytes / (1024 * 1024)).toFixed(1);
+		return t('files.uploaded_saved', { mb }, `Upload complete — ${mb} MB deduplicated`);
+	}
+
+	/**
 	 * Upload a batch of files into the current folder, reporting aggregate
 	 * progress through a single bell notification with a progress bar.
 	 */
@@ -301,32 +337,23 @@
 		const nid = ui.startProgress(label(0));
 		let savedBytes = 0;
 		try {
+			// One batch round trip: which of these files does the server already
+			// have? Owned ones upload as zero bytes; the rest go delta/plain.
+			const owned = await resolveOwnedHashes(files);
 			for (let i = 0; i < files.length; i++) {
 				const report = (frac: number) => {
 					const base = i / total;
 					const step = Number.isNaN(frac) ? 0 : frac / total;
 					ui.updateProgress(nid, Math.round((base + step) * 100), label(i));
 				};
-				// Delta upload for large files (dedup); transparently falls back.
-				const delta = await tryDeltaUpload(files[i], currentId, (pct) => report(pct / 100));
-				if (delta) {
-					if (!delta.ok) throw new Error(delta.errorMsg ?? 'upload failed');
-					savedBytes += delta.savedBytes ?? 0;
-				} else {
-					await uploadFileWithProgress(currentId, files[i], report);
-				}
+				savedBytes += await uploadOneFile(currentId, files[i], report, owned.get(files[i]) ?? null);
 				ui.updateProgress(nid, Math.round(((i + 1) / total) * 100), label(i + 1));
 			}
-			const done =
-				savedBytes > 0
-					? t(
-							'files.uploaded_saved',
-							{ mb: (savedBytes / (1024 * 1024)).toFixed(1) },
-							`Upload complete — ${(savedBytes / (1024 * 1024)).toFixed(1)} MB deduplicated`
-						)
-					: t('files.uploaded', 'Upload complete');
-			ui.finishProgress(nid, done, 'success');
+			ui.finishProgress(nid, uploadDoneMessage(savedBytes), 'success');
 			await reload();
+			// Storage usage changed server-side — pull the fresh figure so the
+			// "Almacenamiento" bar moves off its login value instead of 0%.
+			void session.refresh();
 		} catch (err) {
 			ui.finishProgress(nid, errorMessage(err), 'error');
 		} finally {
@@ -430,6 +457,7 @@
 			if (kind === 'file') await deleteFile(id);
 			else await deleteFolder(id);
 			await reload();
+			void session.refresh();
 		} catch (e) {
 			errorToast(e);
 		}
@@ -480,16 +508,16 @@
 	});
 
 	/**
-	 * Whether the server can render a thumbnail preview for this file. Images and
-	 * videos always have one; PDFs (and other thumbnail-capable docs) do too, so
-	 * surface those rather than a generic icon. A failed <img> load falls back to
-	 * the icon via onerror, so being permissive here is safe.
+	 * Whether the server can render a thumbnail preview for this file. Only images
+	 * and videos have server-side thumbnails (see `ThumbnailService::is_supported_image`
+	 * plus client-uploaded video frames); the backend does NOT rasterise PDFs or
+	 * documents, so claiming it could left their tiles blank (the doomed <img>
+	 * 404s and `onerror` hides it). Non-thumbnail files fall back to their colour
+	 * type icon, which renders underneath the <img> regardless.
 	 */
 	function canThumbnail(file: FileItem): boolean {
 		const m = file.mime_type ?? '';
-		if (m.startsWith('image/') || m.startsWith('video/')) return true;
-		if (m === 'application/pdf') return true;
-		return /\.pdf$/i.test(file.name);
+		return m.startsWith('image/') || m.startsWith('video/');
 	}
 
 	// ── Multi-select + batch ────────────────────────────────────────────────
@@ -690,6 +718,7 @@
 		}
 		clearSelection();
 		await reload();
+		void session.refresh();
 	}
 
 	// ── Drag-to-move ─────────────────────────────────────────────────────────
@@ -955,6 +984,13 @@
 	async function uploadTree(entries: { file: File; relativePath: string }[]) {
 		if (entries.length === 0) return;
 		uploading = true;
+		const total = entries.length;
+		const label = (done: number) =>
+			t('files.uploading_n', { done, total }, `Uploading ${done}/${total} files…`);
+		// Same bell progress notification as uploadBatch, so folder uploads show
+		// live progress + a final result instead of staying silent until the end.
+		const nid = ui.startProgress(label(0));
+		let savedBytes = 0;
 		try {
 			// Map each relative directory path to its created folder id; '' = current.
 			const dirIds = new Map<string, string | null>([['', currentId]]);
@@ -969,16 +1005,31 @@
 				return created.id;
 			}
 
-			for (const { file, relativePath } of entries) {
+			// One batch round trip for the whole tree: which files does the server
+			// already have? Owned ones upload as zero bytes.
+			const owned = await resolveOwnedHashes(entries.map((e) => e.file));
+			for (let i = 0; i < entries.length; i++) {
+				const { file, relativePath } = entries[i];
 				const segs = relativePath.split('/');
 				segs.pop(); // drop the filename, keep the directory trail
 				const dirId = await ensureDir(segs.join('/'));
-				await uploadFile(dirId, file);
+				savedBytes += await uploadOneFile(
+					dirId,
+					file,
+					(frac) => {
+						const base = i / total;
+						const step = Number.isNaN(frac) ? 0 : frac / total;
+						ui.updateProgress(nid, Math.round((base + step) * 100), label(i));
+					},
+					owned.get(file) ?? null
+				);
+				ui.updateProgress(nid, Math.round(((i + 1) / total) * 100), label(i + 1));
 			}
-			ui.notify(t('files.uploaded', 'Upload complete'), 'success');
+			ui.finishProgress(nid, uploadDoneMessage(savedBytes), 'success');
 			await reload();
+			void session.refresh();
 		} catch (err) {
-			errorToast(err);
+			ui.finishProgress(nid, errorMessage(err), 'error');
 		} finally {
 			uploading = false;
 		}
@@ -1458,7 +1509,7 @@
 			/>
 		</div>
 		<div class="name-cell">
-			<div class="file-icon"><Icon name="folder" /></div>
+			<div class="file-icon file-icon--folder"><Icon name="folder" /></div>
 			<span title={folder.name}>{folder.name}</span>
 			{#if favoriteIds.has(folder.id)}<div
 					class="item-badge item-badge--fav"
@@ -1538,6 +1589,7 @@
 {/snippet}
 
 {#snippet fileRow(file: FileItem)}
+	{@const iconName = iconNameFromClass(file.icon_class)}
 	<div
 		class="file-item"
 		class:selected={selected.has(file.id)}
@@ -1564,7 +1616,10 @@
 			/>
 		</div>
 		<div class="name-cell">
-			<div class="file-icon">
+			<div class="file-icon {fileIconKindClass(iconName)}">
+				<!-- Colour type icon is always rendered; a successful thumbnail covers it
+				     edge-to-edge, and a failed one (onerror hides the <img>) reveals it. -->
+				<Icon name={iconName} />
 				{#if canThumbnail(file)}
 					<img
 						class="file-thumb"
@@ -1573,8 +1628,6 @@
 						loading="lazy"
 						onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
 					/>
-				{:else}
-					<Icon name={iconNameFromClass(file.icon_class)} />
 				{/if}
 			</div>
 			<span title={file.name}>{file.name}</span>

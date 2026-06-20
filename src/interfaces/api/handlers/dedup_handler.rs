@@ -1,10 +1,10 @@
 use axum::{
     body::Body,
-    extract::{Multipart, Path, State},
+    extract::{Json, Multipart, Path, State},
     http::{Response, StatusCode, header},
     response::IntoResponse,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::common::di::AppState;
@@ -14,6 +14,17 @@ use std::sync::Arc;
 
 /// Global application state for dependency injection
 type GlobalState = Arc<AppState>;
+
+/// Upper bound on hashes accepted in one batch ownership check — keeps a single
+/// request from pinning the DB with a pathologically large `ANY(...)` array.
+/// ~10k covers any realistic folder upload; clients fall back to plain uploads
+/// for whatever doesn't fit.
+const MAX_BATCH_HASHES: usize = 10_000;
+
+/// A well-formed BLAKE3 hash is 64 hex characters.
+fn is_valid_blob_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
 
 /// Response for hash check endpoint
 #[derive(Debug, Serialize, ToSchema)]
@@ -30,6 +41,20 @@ pub struct HashCheckResponse {
     /// omitted for regular users to prevent cross-user content inference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ref_count: Option<u32>,
+}
+
+/// Request body for the batch hash-ownership check (`POST /api/dedup/check-batch`).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct HashBatchRequest {
+    /// Candidate BLAKE3 hashes (64 hex chars each) to test for ownership.
+    pub hashes: Vec<String>,
+}
+
+/// Response for the batch hash-ownership check.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HashBatchResponse {
+    /// The subset of the submitted `hashes` the authenticated user already owns.
+    pub owned: Vec<String>,
 }
 
 /// Response for upload with dedup endpoint
@@ -98,7 +123,7 @@ impl DedupHandler {
         let dedup = &state.core.dedup_service;
 
         // Validate hash format (BLAKE3 = 64 hex chars)
-        if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !is_valid_blob_hash(&hash) {
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -150,6 +175,52 @@ impl DedupHandler {
                 .unwrap()
                 .into_response()
         }
+    }
+
+    /// Batch variant of [`Self::check_hash_impl`]: return the subset of the
+    /// submitted hashes the authenticated user already owns, in one round trip.
+    /// Lets a client hash a whole upload set up front and learn which files it
+    /// can skip with ONE request instead of one probe per file.
+    ///
+    /// User-scoped (anti-enumeration): only the caller's own blobs are echoed
+    /// back — never reveals whether other users hold a blob. Malformed hashes
+    /// are silently dropped (they can't be owned anyway).
+    ///
+    /// POST /api/dedup/check-batch
+    pub(super) async fn check_hashes_batch_impl(
+        State(state): State<GlobalState>,
+        auth_user: AuthUser,
+        Json(request): Json<HashBatchRequest>,
+    ) -> impl IntoResponse {
+        if request.hashes.len() > MAX_BATCH_HASHES {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"error": "Too many hashes in one batch"}"#))
+                .unwrap()
+                .into_response();
+        }
+
+        let valid: Vec<String> = request
+            .hashes
+            .into_iter()
+            .filter(|h| is_valid_blob_hash(h))
+            .collect();
+
+        let owned = state
+            .core
+            .dedup_service
+            .user_owned_blob_references(&valid, &auth_user.id.to_string())
+            .await;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_string(&HashBatchResponse { owned }).unwrap(),
+            ))
+            .unwrap()
+            .into_response()
     }
 
     /// Upload content with automatic deduplication (streaming).
@@ -313,7 +384,7 @@ impl DedupHandler {
         let dedup = &state.core.dedup_service;
 
         // Validate hash format
-        if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !is_valid_blob_hash(&hash) {
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -470,6 +541,25 @@ pub async fn check_hash(
     path: Path<String>,
 ) -> impl IntoResponse {
     DedupHandler::check_hash_impl(state, auth_user, path).await
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/dedup/check-batch",
+    request_body = HashBatchRequest,
+    responses(
+        (status = 200, description = "The subset of the submitted hashes the caller already owns", body = HashBatchResponse),
+        (status = 400, description = "Too many hashes in one batch"),
+    ),
+    tag = "dedup",
+    security(("bearerAuth" = []))
+)]
+pub async fn check_hashes_batch(
+    state: State<GlobalState>,
+    auth_user: AuthUser,
+    body: Json<HashBatchRequest>,
+) -> impl IntoResponse {
+    DedupHandler::check_hashes_batch_impl(state, auth_user, body).await
 }
 
 #[utoipa::path(
@@ -750,5 +840,31 @@ mod tests {
         assert_eq!(parsed["is_new"], false);
         assert_eq!(parsed["bytes_saved"], 2048);
         assert_eq!(parsed["ref_count"], 3);
+    }
+
+    #[test]
+    fn valid_blob_hash_accepts_64_hex_only() {
+        assert!(is_valid_blob_hash(&"abcdef0123456789".repeat(4))); // 64 hex chars
+        assert!(!is_valid_blob_hash(&"a".repeat(63))); // too short
+        assert!(!is_valid_blob_hash(&"a".repeat(65))); // too long
+        assert!(!is_valid_blob_hash(&"g".repeat(64))); // non-hex
+        assert!(!is_valid_blob_hash("")); // empty
+    }
+
+    #[test]
+    fn hash_batch_request_deserializes() {
+        let req: HashBatchRequest = serde_json::from_str(r#"{"hashes":["aa","bb"]}"#).unwrap();
+        assert_eq!(req.hashes, vec!["aa".to_string(), "bb".to_string()]);
+    }
+
+    #[test]
+    fn hash_batch_response_serializes_owned_subset() {
+        let r = HashBatchResponse {
+            owned: vec!["a".repeat(64), "b".repeat(64)],
+        };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(parsed["owned"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["owned"][0], "a".repeat(64));
     }
 }

@@ -52,7 +52,8 @@
     "trash": "ゴミ箱",
     "sharedwithme": "自分と共有",
     "profile": "プロフィール",
-    "shared_with_me": "自分と共有"
+    "shared_with_me": "自分と共有",
+    "groups": "グループ"
   },
   "photos": {
     "empty_state": "写真はまだありません",

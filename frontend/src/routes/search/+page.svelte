@@ -10,7 +10,7 @@
 	import { t } from '$lib/i18n/index.svelte';
 	import { files as filesStore } from '$lib/stores/files.svelte';
 	import { formatBytes } from '$lib/utils/format';
-	import { formatDate, iconNameFromClass } from '$lib/utils/display';
+	import { formatDate, iconNameFromClass, fileIconKindClass } from '$lib/utils/display';
 
 	const query = $derived(page.url.searchParams.get('q') ?? '');
 
@@ -265,7 +265,7 @@
 					onkeydown={(e) => e.key === 'Enter' && openFolder(folder)}
 				>
 					<div class="name-cell">
-						<span class="file-icon"><Icon name="folder" /></span>
+						<span class="file-icon file-icon--folder"><Icon name="folder" /></span>
 						<span>{folder.name}</span>
 					</div>
 					<div class="path-cell">{folder.path}</div>
@@ -283,7 +283,9 @@
 					onkeydown={(e) => e.key === 'Enter' && openFile(file)}
 				>
 					<div class="name-cell">
-						<span class="file-icon"><Icon name={iconNameFromClass(file.icon_class)} /></span>
+						<span class="file-icon {fileIconKindClass(iconNameFromClass(file.icon_class))}"
+							><Icon name={iconNameFromClass(file.icon_class)} /></span
+						>
 						<span>{file.name}</span>
 					</div>
 					<div class="path-cell">{file.path}</div>

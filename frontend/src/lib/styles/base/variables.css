@@ -236,7 +236,11 @@
     --color-text-gray: var(--color-text-muted);
     --color-text-medium: var(--color-text-muted);
     --color-text-faint2: var(--color-text-faint);
-    --color-text-light: var(--color-text-faint);
+    /* "Light" = light-coloured (near-white) text for accent/dark fills, NOT a
+     * faint tier. Every consumer is a primary button (background: --color-primary),
+     * so this must resolve to the on-accent foreground, not muted grey — which
+     * rendered muddy and failed contrast on the orange accent. */
+    --color-text-light: var(--color-on-accent);
     --color-text-placeholder: var(--color-text-faint);
 
     /* Accent (orange) — mostly mode-agnostic. */
@@ -643,6 +647,24 @@
 
     /* Status badge — gray/disabled */
     --color-badge-gray: #d1d5db;
+
+    /* File-type glyph colours — one vivid hue per broad file family, used by the
+     * .file-icon--* buckets (resourceList.css) so the grid/list type icons read
+     * as colourful tiles instead of flat monochrome. Tile tints are derived from
+     * these with color-mix(), so only the foreground hue lives here. Dark-mode
+     * shades are lightened for contrast against the dark tile fill. */
+    --file-kind-folder: light-dark(#3b82f6, #60a5fa);
+    --file-kind-pdf: light-dark(#ef4444, #f87171);
+    --file-kind-doc: light-dark(#2563eb, #60a5fa);
+    --file-kind-sheet: light-dark(#16a34a, #4ade80);
+    --file-kind-slides: light-dark(#ea580c, #fb923c);
+    --file-kind-archive: light-dark(#d97706, #fbbf24);
+    --file-kind-code: light-dark(#7c3aed, #a78bfa);
+    --file-kind-image: light-dark(#0891b2, #22d3ee);
+    --file-kind-video: light-dark(#c026d3, #e879f9);
+    --file-kind-audio: light-dark(#db2777, #f472b6);
+    --file-kind-text: light-dark(#475569, #94a3b8);
+    --file-kind-generic: light-dark(#64748b, #94a3b8);
 
     /* (Removed: the legacy dark-mode badge tokens that lived here had zero
      * consumers — the light-dark() badge tokens above are the single source.) */

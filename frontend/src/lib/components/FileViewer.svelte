@@ -40,9 +40,14 @@
 	let canEdit = $state(false);
 	/** Image zoom factor (1 = fit). */
 	let zoom = $state(1);
-	/** PDF embed fallback engaged when the <object> stays blank ~2s. */
-	let pdfFallback = $state(false);
-	let pdfObjectEl = $state<HTMLObjectElement | null>(null);
+	/** Object URL for the fetched PDF blob. The PDF is rendered from a same-origin
+	 *  blob: in an <iframe> (allowed by CSP `frame-src blob:`) rather than from its
+	 *  API URL directly — that response carries the global `X-Frame-Options: DENY`
+	 *  + `frame-ancestors 'none'`, which the browser's framed PDF viewer honours,
+	 *  so an embedded API URL renders as a broken-document icon. A blob has no
+	 *  response headers, so it sidesteps the framing block. */
+	let pdfUrl = $state<string | null>(null);
+	let pdfError = $state(false);
 
 	function isImage(f: FileItem): boolean {
 		const m = (f.mime_type ?? '').toLowerCase();
@@ -72,7 +77,7 @@
 		open = false;
 		textContent = '';
 		zoom = 1;
-		pdfFallback = false;
+		pdfError = false;
 		onrefresh?.();
 	}
 
@@ -94,7 +99,6 @@
 		const f = file;
 		canEdit = false;
 		zoom = 1;
-		pdfFallback = false;
 		const k = kindOf(f);
 
 		// Office docs (WOPI-editable, non-image) open straight in the editor
@@ -119,21 +123,25 @@
 				.finally(() => (textLoading = false));
 		}
 
-		// PDF blank-render guard: if the <object> shows nothing after ~2s,
-		// fall back to an <embed> (some browsers refuse <object> for PDFs).
+		// Fetch the PDF as a same-origin blob and view it via an object URL (see
+		// `pdfUrl`). The cleanup revokes the URL when the file changes or the
+		// viewer closes; a stale response (newer file opened mid-fetch) is dropped.
 		if (k === 'pdf') {
-			const timer = setTimeout(() => {
-				const el = pdfObjectEl;
-				let blank = false;
-				try {
-					const doc = el?.contentDocument;
-					blank = !doc || doc.body?.innerHTML === '';
-				} catch {
-					blank = false; // cross-origin: assume it rendered
-				}
-				if (blank) pdfFallback = true;
-			}, 2000);
-			return () => clearTimeout(timer);
+			pdfError = false;
+			pdfUrl = null;
+			let objectUrl: string | null = null;
+			apiFetch(fileInlineUrl(f.id), { credentials: 'same-origin' })
+				.then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`HTTP ${r.status}`))))
+				.then((blob) => {
+					if (file !== f || !open) return;
+					objectUrl = URL.createObjectURL(blob);
+					pdfUrl = objectUrl;
+				})
+				.catch(() => (pdfError = true));
+			return () => {
+				if (objectUrl) URL.revokeObjectURL(objectUrl);
+				pdfUrl = null;
+			};
 		}
 	});
 </script>
@@ -220,18 +228,15 @@
 				{:else if kind === 'audio'}
 					<audio class="fv__audio" src={fileInlineUrl(file.id)} controls></audio>
 				{:else if kind === 'pdf'}
-					{#if pdfFallback}
-						<embed class="fv__pdf" src={fileInlineUrl(file.id)} type="application/pdf" />
-					{:else}
-						<object
-							bind:this={pdfObjectEl}
-							class="fv__pdf"
-							data={fileInlineUrl(file.id)}
-							type="application/pdf"
-							title={file.name}
-						>
+					{#if pdfError}
+						<div class="fv__status fv__status--center">
+							<Icon name="file" class="fv__big-icon" />
 							<p>{t('files.preview_failed', 'Could not load preview.')}</p>
-						</object>
+						</div>
+					{:else if pdfUrl}
+						<iframe class="fv__pdf" src={pdfUrl} title={file.name}></iframe>
+					{:else}
+						<p class="fv__status">{t('common.loading', 'Loading…')}</p>
 					{/if}
 				{:else if kind === 'text'}
 					{#if textLoading}

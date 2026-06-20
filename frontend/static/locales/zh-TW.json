@@ -52,7 +52,8 @@
     "trash": "回收站",
     "sharedwithme": "與我共享",
     "profile": "個人資料",
-    "shared_with_me": "與我共享"
+    "shared_with_me": "與我共享",
+    "groups": "群組"
   },
   "photos": {
     "empty_state": "還沒有照片",

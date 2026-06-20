@@ -262,7 +262,7 @@
 }
 
 .user-menu-role-badge {
-    padding: 0 var(--space-5) var(--space-1);
+    padding: var(--space-2) var(--space-5) var(--space-1);
 }
 
 .role-badge {

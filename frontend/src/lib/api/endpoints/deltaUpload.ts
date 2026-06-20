@@ -8,6 +8,8 @@
  * byte upload — delta is an optimization, never a gate.
  */
 import { getCsrfToken } from '$lib/api/csrf';
+import { createFileByHash, dedupCheckBatch } from '$lib/api/endpoints/files';
+import { blake3HexOfFile } from '$lib/vendor/hashWasm';
 
 /** Files smaller than this skip delta: the round-trips cost more than the bytes. */
 export const DELTA_UPLOAD_MIN_SIZE = 8 * 1024 * 1024;
@@ -127,4 +129,59 @@ export function tryDeltaUpload(
 
 		worker.postMessage({ file, folderId, name: file.name, csrfToken: getCsrfToken() || '' });
 	});
+}
+
+/**
+ * Create a file from a blob the caller already owns (`POST /api/files/by-hash`)
+ * — zero content bytes cross the wire. `hash` must come from a prior batch
+ * ownership check ([`resolveOwnedHashes`]). Resolves an answer with
+ * `savedBytes = file.size` on success, surfaces a 507 quota error, or resolves
+ * `null` to fall back to a normal upload (e.g. the blob was GC'd between the
+ * check and this create — rare).
+ */
+export async function instantUploadOwned(
+	folderId: string,
+	file: File,
+	hash: string
+): Promise<DeltaUploadAnswer | null> {
+	const res = await createFileByHash(folderId, file.name, hash);
+	if (res.ok) return { ok: true, data: res.data, savedBytes: file.size };
+	if (res.status === 507) {
+		return { ok: false, isQuotaError: true, errorMsg: 'Storage quota exceeded' };
+	}
+	return null;
+}
+
+/**
+ * Resolve which of `files` the server already owns, with a SINGLE batch round
+ * trip (the Dropbox-style "have you got these?" probe). Every file below the
+ * delta threshold is BLAKE3-hashed locally, the whole hash set is sent to
+ * `/api/dedup/check-batch`, and the owned subset is mapped back to `file → hash`
+ * so callers can instant-upload those (zero bytes) and upload the rest normally.
+ *
+ * Excludes empty files and files `>= DELTA_UPLOAD_MIN_SIZE` (the delta protocol
+ * dedups those itself). Resolves an empty map on any failure — hashing
+ * unavailable, request error — so uploads always proceed.
+ */
+export async function resolveOwnedHashes(files: File[]): Promise<Map<File, string>> {
+	const inBand = files.filter((f) => f.size > 0 && f.size < DELTA_UPLOAD_MIN_SIZE);
+	if (inBand.length === 0) return new Map();
+
+	const hashByFile = new Map<File, string>();
+	try {
+		for (const f of inBand) hashByFile.set(f, await blake3HexOfFile(f));
+	} catch {
+		return new Map(); // WASM/hashing unavailable → skip instant uploads
+	}
+
+	let owned: Set<string>;
+	try {
+		owned = await dedupCheckBatch([...new Set(hashByFile.values())]);
+	} catch {
+		return new Map();
+	}
+
+	const result = new Map<File, string>();
+	for (const [f, h] of hashByFile) if (owned.has(h)) result.set(f, h);
+	return result;
 }

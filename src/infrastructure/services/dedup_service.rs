@@ -1075,6 +1075,33 @@ impl DedupService {
         .unwrap_or(false)
     }
 
+    /// Batch variant of [`Self::user_owns_blob_reference`]: given candidate
+    /// hashes, return the subset the user already references — in ONE query
+    /// (backed by `idx_files_blob_hash`). Lets a client hash a whole upload set
+    /// and learn which files it can skip with a single round trip instead of
+    /// one probe per file.
+    ///
+    /// User-scoped, exactly like the single check: only the caller's own blobs
+    /// are returned, so it cannot probe whether *other* users hold a blob.
+    pub async fn user_owned_blob_references(
+        &self,
+        hashes: &[String],
+        user_id: &str,
+    ) -> Vec<String> {
+        if hashes.is_empty() {
+            return Vec::new();
+        }
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT blob_hash FROM storage.files \
+             WHERE blob_hash = ANY($1) AND user_id = $2::uuid",
+        )
+        .bind(hashes)
+        .bind(user_id)
+        .fetch_all(self.pool.as_ref())
+        .await
+        .unwrap_or_default()
+    }
+
     /// Get metadata for a blob (manifest-aware with legacy fallback).
     pub async fn get_blob_metadata(&self, hash: &str) -> Option<BlobMetadataDto> {
         // Check manifest first

@@ -52,7 +52,8 @@
     "trash": "Papelera",
     "sharedwithme": "Compartidos conmigo",
     "profile": "Perfil",
-    "shared_with_me": "Compartidos conmigo"
+    "shared_with_me": "Compartidos conmigo",
+    "groups": "Grupos"
   },
   "photos": {
     "empty_state": "Aún no hay fotos",
@@ -365,7 +366,8 @@
     "new_folder": "Nueva carpeta",
     "share": "Compartir",
     "view": "Ver",
-    "selected_count": "{{count}} seleccionados"
+    "selected_count": "{{count}} seleccionados",
+    "uploaded_saved": "Subida completa — {{mb}} MB deduplicados"
   },
   "dialogs": {
     "rename_folder": "Renombrar carpeta",

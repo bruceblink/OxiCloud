@@ -52,7 +52,8 @@
     "trash": "휴지통",
     "sharedwithme": "나와 공유됨",
     "profile": "프로필",
-    "shared_with_me": "나와 공유됨"
+    "shared_with_me": "나와 공유됨",
+    "groups": "그룹"
   },
   "photos": {
     "empty_state": "아직 사진이 없습니다",

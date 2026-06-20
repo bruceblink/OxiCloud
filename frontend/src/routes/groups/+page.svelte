@@ -6,6 +6,7 @@
 		addUserMember,
 		createGroup,
 		deleteGroup,
+		groupDescription,
 		groupDisplayName,
 		groupIconName,
 		INTERNAL_GROUP_ID,
@@ -243,6 +244,7 @@
 	{:else}
 		<ul class="list">
 			{#each groups as g (g.id)}
+				{@const description = groupDescription(g)}
 				<li class="group">
 					<div class="group__row">
 						<button class="group__name" onclick={() => expand(g)}>
@@ -254,7 +256,7 @@
 											>{t('groups.virtual_badge', 'System')}</span
 										>{/if}
 								</span>
-								{#if g.description}<span class="muted">{g.description}</span>{/if}
+								{#if description}<span class="muted">{description}</span>{/if}
 								{#if !g.is_virtual && g.member_count != null}
 									<span class="muted">{memberCountLabel(g.member_count)}</span>
 								{/if}

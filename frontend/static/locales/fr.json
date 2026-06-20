@@ -52,7 +52,8 @@
     "trash": "Corbeille",
     "sharedwithme": "Partages avec moi",
     "profile": "Profil",
-    "shared_with_me": "Partages avec moi"
+    "shared_with_me": "Partages avec moi",
+    "groups": "Groupes"
   },
   "photos": {
     "empty_state": "Pas encore de photos",
