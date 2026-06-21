@@ -1,7 +1,8 @@
 use axum::{
     Json,
+    body::Body,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, Response, StatusCode, header},
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,7 @@ struct PhotoDto {
 pub async fn list_photos(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    headers: HeaderMap,
     Query(params): Query<PhotosQueryParams>,
 ) -> impl IntoResponse {
     let user_id = auth_user.id;
@@ -71,7 +73,35 @@ pub async fn list_photos(
         .await
     {
         Ok((files, sort_dates, dims)) => {
-            info!("Photos: returned {} media files for user", files.len());
+            // Lightweight revalidation ETag: page identity (cursor + limit) plus a
+            // freshness signal (max modified_at + row count over the page),
+            // mirroring the file-list endpoint. With `Cache-Control: no-cache` the
+            // browser always revalidates with If-None-Match, so a "navigate away
+            // and back" to an unchanged gallery returns an empty 304 instead of
+            // rebuilding 500 DTOs + reserializing + reshipping the whole body.
+            let max_mod = files.iter().map(|f| f.modified_at()).max().unwrap_or(0);
+            let count = files.len();
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&params.before, &mut hasher);
+            std::hash::Hash::hash(&limit, &mut hasher);
+            std::hash::Hash::hash(&max_mod, &mut hasher);
+            std::hash::Hash::hash(&count, &mut hasher);
+            let etag = format!("\"{:x}\"", std::hash::Hasher::finish(&hasher));
+
+            if let Some(inm) = headers.get(header::IF_NONE_MATCH)
+                && let Ok(client_etag) = inm.to_str()
+                && client_etag == etag
+            {
+                return Response::builder()
+                    .status(StatusCode::NOT_MODIFIED)
+                    .header(header::ETAG, &etag)
+                    .header(header::CACHE_CONTROL, "private, no-cache")
+                    .body(Body::empty())
+                    .unwrap()
+                    .into_response();
+            }
+
+            info!("Photos: returned {} media files for user", count);
 
             // Convert to DTOs with sort_date + pixel dimensions populated.
             let dtos: Vec<PhotoDto> = files
@@ -89,12 +119,17 @@ pub async fn list_photos(
                 })
                 .collect();
 
-            // Set cursor header for next page
             let mut response = Json(&dtos).into_response();
-            if let Some(&last_sd) = sort_dates.last() {
-                response
-                    .headers_mut()
-                    .insert("X-Next-Cursor", last_sd.to_string().parse().unwrap());
+            {
+                let h = response.headers_mut();
+                h.insert(header::ETAG, header::HeaderValue::from_str(&etag).unwrap());
+                h.insert(
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("private, no-cache"),
+                );
+                if let Some(&last_sd) = sort_dates.last() {
+                    h.insert("X-Next-Cursor", last_sd.to_string().parse().unwrap());
+                }
             }
 
             response
