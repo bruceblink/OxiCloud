@@ -190,6 +190,15 @@ name = "bench_tokio_runtime"
 path = "examples/bench_tokio_runtime.rs"
 required-features = ["bench"]
 
+# CPU pool concurrency benchmark — thumbnail decode throughput + p99 as the
+# decode-permit count is swept, showing the effect of sizing the image pools to
+# the CFS quota (effective_parallelism) vs the host core count. No Postgres;
+# run under `taskset -c 0,1` to model a 2-core quota.
+[[example]]
+name = "bench_pool_concurrency"
+path = "examples/bench_pool_concurrency.rs"
+required-features = ["bench"]
+
 # ACL owner-cache benchmark — owner query vs moka hit (needs the dev Postgres up).
 [[example]]
 name = "bench_owner_cache"
