@@ -128,12 +128,29 @@ async fn fsync_paths_parallel(paths: Vec<PathBuf>, strict: bool) -> Result<(), D
 /// (fsync now vs. deferred batch sync), or `None` when the blob already
 /// existed (idempotent skip — content-addressed, so identical by definition).
 async fn write_blob_bytes(blob_path: &Path, data: &Bytes) -> Result<Option<File>, DomainError> {
-    if fs::try_exists(blob_path).await.unwrap_or(false) {
-        return Ok(None);
-    }
-    let mut file = fs::File::create(blob_path).await.map_err(|e| {
-        DomainError::internal_error("Blob", format!("Failed to create blob file: {}", e))
-    })?;
+    // `create_new` = `open(O_CREAT | O_EXCL)`: ONE syscall that both tests for
+    // existence and creates, replacing the old `try_exists` (stat) + `File::create`
+    // (two metadata syscalls, each its own `spawn_blocking` round-trip on Tokio's
+    // blocking pool). On a large upload of unique data that's thousands of stats
+    // saved. The blob is content-addressed, so an already-present file is
+    // byte-identical by definition → `AlreadyExists` is exactly the idempotent
+    // skip the old `try_exists` branch performed — and O_EXCL closes the TOCTOU
+    // window the check-then-create pair left open (no truncate-over-a-racing-writer).
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(blob_path)
+        .await
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(None),
+        Err(e) => {
+            return Err(DomainError::internal_error(
+                "Blob",
+                format!("Failed to create blob file: {}", e),
+            ));
+        }
+    };
     file.write_all(data).await.map_err(|e| {
         DomainError::internal_error("Blob", format!("Failed to write blob from bytes: {}", e))
     })?;

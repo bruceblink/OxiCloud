@@ -199,6 +199,14 @@ name = "bench_pool_concurrency"
 path = "examples/bench_pool_concurrency.rs"
 required-features = ["bench"]
 
+# Blob write syscall benchmark — per-chunk stat removal in write_blob_bytes
+# (try_exists+create → create_new). Measures new-chunk write throughput, old
+# vs new strategy, swept over chunk size. No Postgres needed.
+[[example]]
+name = "bench_blob_write"
+path = "examples/bench_blob_write.rs"
+required-features = ["bench"]
+
 # ACL owner-cache benchmark — owner query vs moka hit (needs the dev Postgres up).
 [[example]]
 name = "bench_owner_cache"
