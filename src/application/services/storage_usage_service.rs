@@ -166,10 +166,18 @@ impl StorageUsageService {
         folder_id: Uuid,
         delta: i64,
     ) -> Result<(), DomainError> {
+        // FROM-form UPDATE keeps the same join shape as
+        // `check_drive_quota_by_folder` so both methods agree on
+        // how a folder maps to its drive. A subquery form would
+        // silently `UPDATE … WHERE id = NULL` (matching zero rows)
+        // if the lookup misses; the FROM-form simply doesn't match
+        // — same outcome, more conventional SQL.
         sqlx::query(
-            "UPDATE storage.drives
-                SET used_bytes = GREATEST(0, used_bytes + $2)
-              WHERE id = (SELECT drive_id FROM storage.folders WHERE id = $1)",
+            "UPDATE storage.drives d
+                SET used_bytes = GREATEST(0, d.used_bytes + $2)
+               FROM storage.folders f
+              WHERE f.drive_id = d.id
+                AND f.id = $1",
         )
         .bind(folder_id)
         .bind(delta)

@@ -69,6 +69,7 @@ Most runtime variables use the `OXICLOUD_` prefix. A few build-time or allocator
 | `OXICLOUD_ENABLE_SEARCH` | `true` | Full-text and metadata search |
 | `OXICLOUD_ENABLE_MUSIC` | `true` | Music playlists and audio metadata |
 | `OXICLOUD_EXPOSE_SYSTEM_USERS` | `true` | Expose other OxiCloud users as a read-only address book at `GET /api/address-books` |
+| `OXICLOUD_ENABLE_ADMIN_INTERNAL_ENDPOINTS` | `false` | Expose `POST /api/admin/internal/trigger-sweep` and `POST /api/admin/internal/trigger-gc` — test-only synchronous triggers for the storage-usage reconciliation sweep and blob garbage collector. Used by the API test suite to assert post-delete quota convergence without waiting out the periodic ticker. Leave **off** in production: the routes return 404 even to an admin token when disabled. |
 
 ## Storage Backend
 

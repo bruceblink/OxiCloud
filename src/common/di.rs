@@ -548,6 +548,16 @@ impl AppServiceFactory {
             )
             .with_content_cache(core.file_content_cache.clone())
             .with_file_lifecycle_hook(file_lifecycle.clone())
+            // `with_storage_usage_service` wires the post-write delta
+            // hook (`maybe_update_storage_usage`). Without this the
+            // hook is dead code — both per-user and per-drive
+            // `used_bytes` deltas would silently no-op and the
+            // counters drift until the next reconciliation sweep
+            // (default 10 min). `with_instant_upload` below stashes
+            // the same service under a different field used only by
+            // the dedup-instant-upload check, so they're not
+            // interchangeable.
+            .with_storage_usage_service(storage_usage.clone())
             .with_instant_upload(
                 authz.clone(),
                 core.dedup_service.clone(),
