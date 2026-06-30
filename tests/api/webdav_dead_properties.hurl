@@ -37,6 +37,17 @@
 #       guarantee under rename). The Hurl suite had no folder-
 #       side coverage of this until 20260830000001; only the
 #       file MOVE case (step 9) was guarded.
+#   13. Single-file COPY duplicates dead properties (RFC 4918
+#       §8.8). Destination carries a copy of the source's
+#       marker; source retains its copy (COPY ≠ MOVE).
+#       Implementation: `dead_prop_copy` CTE branch in
+#       `copy_file` (migration 20260830000002).
+#   14. Folder COPY (Depth: infinity) duplicates dead
+#       properties for every descendant — both folder and file
+#       dead-props. Implementation: the two INSERT...SELECT
+#       branches in `storage.copy_folder_tree` (migration
+#       20260830000002) that walk `_copy_map` and the new
+#       `_copy_file_map` respectively.
 #
 # XPath assertions deliberately use `local-name()` so the test
 # is robust against the server's choice of namespace prefix —
@@ -393,7 +404,13 @@ Authorization: Bearer {{token}}
 
 HTTP 200
 [Captures]
-rest_file_id: jsonpath "$[?(@.name=='dead-props-moved.txt')].id" nth 0
+# Hurl quirk: `$[?(...)]` collapses to a scalar (not a list) when the
+# filter matches exactly one element, so `nth 0` fails with "invalid
+# filter input type". The bare filter capture returns that scalar
+# directly. Filename uniqueness across the home folder makes the
+# single-match assumption safe — `dead-props-moved.txt` is created
+# only by this test (no other Hurl test ever PUTs that name).
+rest_file_id: jsonpath "$[?(@.name=='dead-props-moved.txt')].id"
 
 
 # Step 11d — REST DELETE. No webdav, no dead-prop API call —
@@ -526,6 +543,251 @@ xpath "string(//*[local-name()='foldermark'])" == "folder-keeps-this"
 # away via FK ON DELETE CASCADE, leaving the schema clean for
 # any subsequent test that touches this path.
 DELETE {{base_url}}/webdav/dead-props-folder-renamed/
+Authorization: Bearer {{token}}
+
+HTTP 204
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 13 — Single-file COPY duplicates dead properties.
+#           RFC 4918 §8.8: dead properties MUST be duplicated.
+#           Implementation is the `dead_prop_copy` CTE branch in
+#           `file_blob_write_repository::copy_file` (inserts a
+#           new dead-prop row per source row, keyed on the new
+#           file's id).
+#
+#           Sequence:
+#             a. PUT a source file.
+#             b. PROPPATCH a marker dead property.
+#             c. COPY (WebDAV) to a new path.
+#             d. PROPFIND the new path; marker must be present.
+#             e. PROPFIND the source path; marker still present
+#                on source too (COPY duplicates — it doesn't
+#                move).
+#             f. Cleanup both files.
+# ─────────────────────────────────────────────────────────────
+
+# Step 13a — source file
+PUT {{base_url}}/webdav/dead-props-copy-src.txt
+Authorization: Bearer {{token}}
+Content-Type: text/plain
+```
+copy source
+```
+
+HTTP 201
+
+
+# Step 13b — set the marker dead property on the source
+PROPPATCH {{base_url}}/webdav/dead-props-copy-src.txt
+Authorization: Bearer {{token}}
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <X:copymark xmlns:X="oxi:test">survives-copy</X:copymark>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>
+```
+
+HTTP 207
+
+
+# Step 13c — COPY the file. Destination is fresh → 201 Created.
+# §9.8.5: 201 when destination is new, 204 when overwriting.
+COPY {{base_url}}/webdav/dead-props-copy-src.txt
+Authorization: Bearer {{token}}
+Destination: {{base_url}}/webdav/dead-props-copy-dst.txt
+
+HTTP 201
+
+
+# Step 13d — destination must carry the property (RFC 4918 §8.8)
+PROPFIND {{base_url}}/webdav/dead-props-copy-dst.txt
+Authorization: Bearer {{token}}
+Depth: 0
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:">
+  <D:allprop/>
+</D:propfind>
+```
+
+HTTP 207
+[Asserts]
+xpath "string(//*[local-name()='copymark'])" == "survives-copy"
+
+
+# Step 13e — source still has it too (COPY, not MOVE)
+PROPFIND {{base_url}}/webdav/dead-props-copy-src.txt
+Authorization: Bearer {{token}}
+Depth: 0
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:">
+  <D:allprop/>
+</D:propfind>
+```
+
+HTTP 207
+[Asserts]
+xpath "string(//*[local-name()='copymark'])" == "survives-copy"
+
+
+# Step 13f — cleanup both
+DELETE {{base_url}}/webdav/dead-props-copy-src.txt
+Authorization: Bearer {{token}}
+
+HTTP 204
+
+
+DELETE {{base_url}}/webdav/dead-props-copy-dst.txt
+Authorization: Bearer {{token}}
+
+HTTP 204
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 14 — Folder COPY duplicates dead properties on every
+#           descendant. RFC 4918 §8.8 + §9.8.3 (Depth: infinity
+#           for collections). Implementation is the two
+#           INSERT...SELECT branches added to
+#           `storage.copy_folder_tree` in migration
+#           20260830000002:
+#             - folders mapped via `_copy_map`
+#             - files mapped via the new `_copy_file_map`
+#
+#           Test shape:
+#             a. MKCOL outer collection.
+#             b. MKCOL inner collection (descendant).
+#             c. PUT a leaf file inside inner.
+#             d. PROPPATCH a marker on the descendant FOLDER.
+#             e. PROPPATCH a different marker on the leaf FILE.
+#             f. COPY outer/ → outer-copy/ (Depth: infinity).
+#             g. PROPFIND descendant in copy; marker present.
+#             h. PROPFIND leaf in copy; marker present.
+#             i. Cleanup both trees.
+# ─────────────────────────────────────────────────────────────
+
+# Step 14a/b/c — build the source subtree
+MKCOL {{base_url}}/webdav/dead-props-copy-tree/
+Authorization: Bearer {{token}}
+
+HTTP 201
+
+
+MKCOL {{base_url}}/webdav/dead-props-copy-tree/inner/
+Authorization: Bearer {{token}}
+
+HTTP 201
+
+
+PUT {{base_url}}/webdav/dead-props-copy-tree/inner/leaf.txt
+Authorization: Bearer {{token}}
+Content-Type: text/plain
+```
+leaf inside the copy tree
+```
+
+HTTP 201
+
+
+# Step 14d — marker on the descendant FOLDER
+PROPPATCH {{base_url}}/webdav/dead-props-copy-tree/inner/
+Authorization: Bearer {{token}}
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <X:innermark xmlns:X="oxi:test">inner-folder-mark</X:innermark>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>
+```
+
+HTTP 207
+
+
+# Step 14e — marker on the leaf FILE
+PROPPATCH {{base_url}}/webdav/dead-props-copy-tree/inner/leaf.txt
+Authorization: Bearer {{token}}
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <X:leafmark xmlns:X="oxi:test">leaf-file-mark</X:leafmark>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>
+```
+
+HTTP 207
+
+
+# Step 14f — recursive COPY (Depth: infinity is the default for
+# collections per RFC 4918 §9.8.3). Destination is fresh → 201.
+COPY {{base_url}}/webdav/dead-props-copy-tree/
+Authorization: Bearer {{token}}
+Destination: {{base_url}}/webdav/dead-props-copy-tree-clone/
+
+HTTP 201
+
+
+# Step 14g — descendant folder in the COPY carries the folder marker.
+# The path resolves only if `storage.copy_folder_tree` correctly
+# duplicated the descendant folder AND its dead-prop row.
+PROPFIND {{base_url}}/webdav/dead-props-copy-tree-clone/inner/
+Authorization: Bearer {{token}}
+Depth: 0
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:">
+  <D:allprop/>
+</D:propfind>
+```
+
+HTTP 207
+[Asserts]
+xpath "string(//*[local-name()='innermark'])" == "inner-folder-mark"
+
+
+# Step 14h — leaf file in the COPY carries the file marker
+PROPFIND {{base_url}}/webdav/dead-props-copy-tree-clone/inner/leaf.txt
+Authorization: Bearer {{token}}
+Depth: 0
+Content-Type: application/xml; charset=utf-8
+```
+<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:">
+  <D:allprop/>
+</D:propfind>
+```
+
+HTTP 207
+[Asserts]
+xpath "string(//*[local-name()='leafmark'])" == "leaf-file-mark"
+
+
+# Step 14i — cleanup both trees. Recursive DELETE cascades each
+# subtree's folder + file rows, and the FK ON DELETE CASCADE on
+# webdav_dead_properties takes the dead-prop rows with them.
+DELETE {{base_url}}/webdav/dead-props-copy-tree/
+Authorization: Bearer {{token}}
+
+HTTP 204
+
+
+DELETE {{base_url}}/webdav/dead-props-copy-tree-clone/
 Authorization: Bearer {{token}}
 
 HTTP 204
